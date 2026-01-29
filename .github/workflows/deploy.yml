@@ -1,0 +1,46 @@
+name: 정적 페이지 빌드 및 배포
+
+on:
+  push:
+    branches:
+      - main  # main 브랜치에 푸시될 때 실행
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 소스 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 의존성 패키지 설치
+        run: npm install
+
+      - name: 프로젝트 빌드
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: 타 레포지토리(pogoksca.github.io)로 배포
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          # GitHub Personal Access Token (PAT)을 사용합니다.
+          # studycafe 레포지토리 설정에서 'STUDYCAFE_DEPLOY_TOKEN'이라는 이름의 Secret으로 등록해야 합니다.
+          personal_token: ${{ secrets.STUDYCAFE_DEPLOY_TOKEN }}
+          # 대상 레포지토리 지정
+          external_repository: pogoksca/pogoksca.github.io
+          # 빌드 결과물이 위치한 디렉토리 (Vite 기본값은 dist)
+          publish_dir: ./dist
+          # 배포될 브랜치 (GitHub Pages용)
+          publish_branch: main
+          # 기존 커밋을 덮어쓰지 않고 배포 (선택 사항)
+          force_push: true
+          # 배포 메시지 설정
+          commit_message: "Auto-deploy from studycafe (${{ github.sha }})"

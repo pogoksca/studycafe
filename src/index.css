@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* iOS-inspired Modern Light Theme */
+  --ios-blue: #007AFF;
+  --ios-indigo: #5856D6;
+  --ios-emerald: #34C759;
+  --ios-rose: #FF3B30;
+  --ios-amber: #FF9500;
+  --ios-gray: #8E8E93;
+  --ios-bg: #FFFFFF;
+  --ios-card-bg: rgba(255, 255, 255, 0.95);
+  --ios-glass-bg: rgba(255, 255, 255, 0.7);
+  --radius-main: 6px;
+}
+
+body {
+  @apply bg-white text-[#1C1C1E] min-h-screen font-sans selection:bg-indigo-500/10;
+  background-image: 
+    radial-gradient(circle at 10% 10%, rgba(88, 86, 214, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 90% 90%, rgba(0, 122, 255, 0.03) 0%, transparent 40%);
+}
+
+/* Unified Modern Radius */
+.rounded-ios {
+  border-radius: var(--radius-main);
+}
+
+.rounded-ios-sm {
+  border-radius: var(--radius-main);
+}
+
+/* Clean Modern Containers */
+.ios-glass {
+  @apply bg-white border border-gray-100 shadow-sm;
+}
+
+.ios-glass-dark {
+  @apply bg-gray-50 border border-gray-100 shadow-sm;
+}
+
+/* Neumorphic / iOS Depth */
+.ios-depth {
+  box-shadow: 
+    inset 0 0 20px rgba(255, 255, 255, 0.05),
+    0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.ios-tap {
+  @apply active:scale-[0.96] active:opacity-80 transition-all duration-300;
+}
+
+/* Canvas Styling */
+canvas {
+  /* Resetting default styles as containers now handle framing */
+  display: block;
+}
+
+.canvas-container {
+  border: none !important;
+  box-shadow: none !important;
+  height: 100% !important;
+}
+
+/* Animations */
+@keyframes spring-up {
+  0% { transform: translateY(20px) scale(0.95); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.animate-spring-up {
+  animation: spring-up 0.6s cubic-bezier(0.2, 0.8, 0.2, 1.1) forwards;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
