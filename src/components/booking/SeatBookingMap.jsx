@@ -1,45 +1,75 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fabric } from 'fabric';
 import { supabase } from '../../lib/supabase';
-import { Search, Info, Map as MapIcon } from 'lucide-react';
+import { Search, Info, Map as MapIcon, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { format, addDays, subDays, parseISO, isToday, isWithinInterval } from 'date-fns';
+import { ko } from 'date-fns/locale';
 
-const SeatBookingMap = ({ onSelectSeat }) => {
+const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChange, selectedZoneId, onZoneChange, minimal = false }) => {
   const containerRef = useRef(null);
   const fabricRef = useRef(null);
   const [selectedSeat, setSelectedSeat] = useState(null);
+  const [zones, setZones] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [opData, setOpData] = useState({ quarters: [], defaults: [], exceptions: [] });
 
   useEffect(() => {
+    fetchInitialData();
+  }, []);
+
+  const fetchInitialData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      setCurrentUser(profile);
+    }
+    
+    const { data: zoneData } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+    if (zoneData && zoneData.length > 0) {
+      setZones(zoneData);
+      if (!selectedZoneId) onZoneChange(zoneData[0].id);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedZoneId) return;
     let isMounted = true;
 
     const init = async () => {
-      // 1. Get current user profile
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!isMounted) return;
+      // 1. Fetch operating data
+      const [qData, dData, eData] = await Promise.all([
+        supabase.from('operation_quarters').select('*'),
+        supabase.from('operation_defaults').select('*').eq('zone_id', selectedZoneId),
+        supabase.from('operation_exceptions').select('*').eq('zone_id', selectedZoneId)
+      ]);
 
-      if (user) {
-        const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        if (!isMounted) return;
-        setCurrentUser(profile);
+      if (isMounted) {
+        setOpData({
+          quarters: qData.data || [],
+          defaults: dData.data || [],
+          exceptions: eData.data || []
+        });
       }
 
-      // 2. Load sessions
-      const { data: sess } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+      // 2. Load sessions for zone
+      const { data: sess } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('zone_id', selectedZoneId)
+        .order('start_time', { ascending: true });
+      
       if (!isMounted) return;
       setSessions(sess || []);
 
       // 3. Setup Canvas (DOM Isolation Pattern)
       if (!containerRef.current) return;
 
-      // Clean check: Dispose old instance
       if (fabricRef.current) {
         fabricRef.current.dispose();
       }
       
-      // Manually manage the canvas element to isolate it from React reconciliation
       containerRef.current.innerHTML = '';
       const canvasEl = document.createElement('canvas');
       containerRef.current.appendChild(canvasEl);
@@ -52,7 +82,7 @@ const SeatBookingMap = ({ onSelectSeat }) => {
       });
       fabricRef.current = canvas;
 
-      await loadData(canvas, sess, user);
+      await loadData(canvas, sess, currentUser);
       if (!isMounted) return;
 
       canvas.on('mouse:down', (options) => {
@@ -64,19 +94,27 @@ const SeatBookingMap = ({ onSelectSeat }) => {
         } else if (options.target.data) {
           const seatData = options.target.data;
           setSelectedSeat(seatData);
-          onSelectSeat(seatData);
+          if (onSelectSeat) onSelectSeat(seatData);
           
+          // Toggle selection outlines
           canvas.getObjects().forEach(obj => {
             if (obj.type === 'group') {
-              obj.item(0).set('stroke', 'rgba(255,255,255,0.1)');
+              const border = obj.getObjects().find(o => o.name === 'selectionBorder');
+              if (border) border.set({ strokeWidth: 0 });
+              obj.set('dirty', true);
             }
           });
-          options.target.item(0).set('stroke', '#ffffff');
-          options.target.item(0).set('strokeWidth', 3);
+          
+          const targetBorder = options.target.getObjects().find(o => o.name === 'selectionBorder');
+          if (targetBorder) {
+            targetBorder.set({ strokeWidth: 2 });
+          }
+          options.target.set({ dirty: true, objectCaching: false });
+          
           canvas.renderAll();
         } else {
           setSelectedSeat(null);
-          onSelectSeat(null);
+          if (onSelectSeat) onSelectSeat(null);
         }
       });
 
@@ -125,47 +163,115 @@ const SeatBookingMap = ({ onSelectSeat }) => {
         fabricRef.current = null;
       }
     };
-  }, []);
+  }, [selectedZoneId, currentUser, viewDate]); 
+
+  const isDateOperating = (dStr) => {
+    const targetDate = parseISO(dStr);
+    
+    // 1. Check Quarters
+    const isInQuarter = opData.quarters.some(q =>
+        q.start_date && q.end_date &&
+        isWithinInterval(targetDate, {
+            start: parseISO(q.start_date),
+            end: parseISO(q.end_date)
+        })
+    );
+    if (!isInQuarter) return false;
+
+    // 2. Check Exceptions (Holidays)
+    const exception = opData.exceptions.find(e => e.exception_date === dStr);
+    if (exception) return false;
+
+    // 3. Check Defaults (At least one period active)
+    const dayOfWeek = targetDate.getDay();
+    const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
+    const hasAnyPeriod = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
+    if (!hasAnyPeriod) return false;
+
+    return true;
+  };
+
+  const handleNextOperatingDay = () => {
+    let checkDate = addDays(parseISO(viewDate), 1);
+    let found = false;
+    let iterations = 0;
+    const maxSearch = 180; 
+
+    while (!found && iterations < maxSearch) {
+      const dStr = format(checkDate, 'yyyy-MM-dd');
+      if (isDateOperating(dStr)) {
+        onDateChange(dStr);
+        found = true;
+      } else {
+        checkDate = addDays(checkDate, 1);
+        iterations++;
+      }
+    }
+  };
+
+  const handlePrevOperatingDay = () => {
+    let checkDate = subDays(parseISO(viewDate), 1);
+    let found = false;
+    let iterations = 0;
+    const maxSearch = 180;
+
+    while (!found && iterations < maxSearch) {
+      const dStr = format(checkDate, 'yyyy-MM-dd');
+      if (isDateOperating(dStr)) {
+        onDateChange(dStr);
+        found = true;
+      } else {
+        checkDate = subDays(checkDate, 1);
+        iterations++;
+      }
+    }
+  };
 
   const loadData = async (canvas, sessList, user) => {
     setLoading(true);
-    const today = new Date().toISOString().split('T')[0];
     
-    // Fetch seats
-    const { data: seats } = await supabase.from('seats').select('*').order('global_number', { ascending: true });
+    // Fetch seats ONLY for selected zone
+    const { data: seats } = await supabase
+      .from('seats')
+      .select('*')
+      .eq('zone_id', selectedZoneId)
+      .order('global_number', { ascending: true });
     
-    // Fetch ALL today's bookings with profile info
+    // Fetch bookings for the selected date
     const { data: todayBookings } = await supabase
       .from('bookings')
-      .select('*, profiles(username, full_name)')
-      .eq('date', today);
+      .select('*, profiles(username, full_name), sessions!inner(*)')
+      .eq('date', viewDate)
+      .eq('sessions.zone_id', selectedZoneId);
 
     if (seats && seats.length > 0) {
+      if (!canvas || canvas.isDisposed || !canvas.getContext()) return; 
+      
       canvas.clear();
       
       const minX = Math.min(...seats.map(s => s.pos_x));
       const maxX = Math.max(...seats.map(s => s.pos_x + (s.width || 72)));
       const layoutWidth = maxX - minX;
       
-      // Expand canvas to container width to fill the white card area
+      // Expand canvas to container width
       const parentWidth = containerRef.current?.clientWidth || layoutWidth;
       const totalCanvasWidth = Math.max(layoutWidth, parentWidth);
-      const offsetX = (totalCanvasWidth - layoutWidth) / 2 - minX;
+      const offsetX = Math.round((totalCanvasWidth - layoutWidth) / 2 - minX);
 
       const minY = Math.min(...seats.map(s => s.pos_y));
       const maxY = Math.max(...seats.map(s => s.pos_y + (s.height || 72)));
       const layoutHeight = maxY - minY;
-      const offsetY = -minY; // 0px top padding
+      const offsetY = Math.round(-minY); 
       
       const containerHeight = containerRef.current?.clientHeight || 0;
       const totalCanvasHeight = Math.max(layoutHeight, containerHeight); 
 
+      if (canvas.isDisposed || !canvas.getContext()) return;
       canvas.setDimensions({ width: totalCanvasWidth, height: totalCanvasHeight });
 
       const now = new Date();
       const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
       
-      // Determine current active session
       const activeSession = sessList?.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
 
       seats.forEach(s => {
@@ -206,8 +312,8 @@ const SeatBookingMap = ({ onSelectSeat }) => {
         top: seatData.pos_y,
         angle: seatData.rotation,
         selectable: false,
-        evented: false, // Not interactive
-        data: { ...seatData } // Pass data just in case
+        evented: false, 
+        data: { ...seatData }
       });
       
       canvas.add(group);
@@ -216,8 +322,8 @@ const SeatBookingMap = ({ onSelectSeat }) => {
 
     const currentBooking = seatBookings.find(b => b.session_id === activeSession?.id);
     const isActiveNow = !!currentBooking;
+    const hasAnyBooking = seatBookings.length > 0;
     
-    // Role-based visibility
     const canSeeDetails = (booking) => {
       if (!currentUser) return false;
       if (['admin', 'teacher'].includes(currentUser.role)) return true;
@@ -229,66 +335,165 @@ const SeatBookingMap = ({ onSelectSeat }) => {
     const baseColor = seatData.zone_color || '#5E5CE6';
     const bg = new fabric.Rect({
       fill: baseColor,
-      opacity: isActiveNow ? 1 : 0.25,
-      width: 72,
+      opacity: isActiveNow ? 0.8 : (hasAnyBooking ? 0.1 : 0.02), // Ultra-faint for empty seats
+      width: 72, 
       height: 72,
       rx: 6, ry: 6,
-      stroke: 'rgba(255,255,255,0.1)',
-      strokeWidth: 2,
+      strokeWidth: 0,
+      left: 0, top: 0,
+      originX: 'left', originY: 'top',
+      selectable: false,
     });
 
-    // 2. Seat Number (Top-left, 12px)
+    // 2. Seat Number Header Area 
+    const headerBg = new fabric.Path('M 0 6 Q 0 0 6 0 L 66 0 Q 72 0 72 6 L 72 18 L 0 18 z', {
+      fill: baseColor,
+      opacity: isActiveNow ? 1 : (hasAnyBooking ? 0.4 : 0.15),
+      strokeWidth: 0,
+      left: 0, top: 0,
+      originX: 'left', originY: 'top',
+      selectable: false,
+    });
+
     const numText = new fabric.IText(seatData.display_number || seatData.seat_number, {
-      fontSize: 12,
-      left: 6, top: 6,
-      fill: isActiveNow ? '#ffffff' : '#1C1C1E',
+      fontSize: 11,
+      left: 6, top: 4, 
+      originX: 'left', originY: 'top',
+      fill: isActiveNow ? '#ffffff' : baseColor,
       fontFamily: 'Inter, -apple-system', fontWeight: '900',
       selectable: false,
     });
 
-    // 3. User Info (Center)
-    let displayInfo = '';
-    if (isActiveNow) {
-      if (canSeeDetails(currentBooking)) {
-        displayInfo = `${currentBooking.profiles.username}\n${currentBooking.profiles.full_name}`;
-      } else {
-        displayInfo = '예약됨';
-      }
-    } else if (seatBookings.length > 0) {
-      displayInfo = '...';
+    // 3. User Info (Detailed Text Lines)
+    const prefixMap = {
+      'Morning': '아침',
+      'Dinner': '석식',
+      '1st Period': '1 차',
+      '2nd Period': '2 차'
+    };
+    
+    const sortedSessions = [...(sessList || [])].sort((a,b) => a.id - b.id);
+    
+    const isDenseMode = sortedSessions.length > 4;
+    let statusObjects = [];
+
+    if (isDenseMode) {
+      const midPoint = Math.ceil(sortedSessions.length / 2);
+      const leftSessions = sortedSessions.slice(0, midPoint);
+      const rightSessions = sortedSessions.slice(midPoint);
+
+      const generateColText = (sessions) => sessions.map(sess => {
+          const booking = seatBookings.find(b => b.session_id === sess.id);
+          const prefix = prefixMap[sess.name] || sess.name.substring(0,2);
+          
+          if (!booking) return `${prefix}:`;
+          if (canSeeDetails(booking)) {
+             return `${prefix}:${booking.profiles.full_name.substring(0,4)}`; 
+          } else {
+             return `${prefix}:예약됨`;
+          }
+      }).join('\n');
+
+      const leftText = new fabric.Text(generateColText(leftSessions), {
+        fontSize: 5.5,
+        fontFamily: 'NanumSquareRound, Inter, sans-serif',
+        fontWeight: 'normal',
+        fill: isActiveNow ? '#ffffff' : '#000000',
+        left: 4, top: 20,
+        lineHeight: 1.35,
+        selectable: false,
+      });
+
+      const rightText = new fabric.Text(generateColText(rightSessions), {
+        fontSize: 5.5,
+        fontFamily: 'NanumSquareRound, Inter, sans-serif',
+        fontWeight: 'normal',
+        fill: isActiveNow ? '#ffffff' : '#000000',
+        left: 38, top: 20,
+        lineHeight: 1.35,
+        selectable: false,
+      });
+
+      statusObjects = [leftText, rightText];
+    } else {
+      sortedSessions.forEach((sess, idx) => {
+         const booking = seatBookings.find(b => b.session_id === sess.id);
+         const prefix = prefixMap[sess.name] || sess.name.substring(0,2);
+         
+         const yPos = 21 + (idx * 13);
+         
+         const labelText = new fabric.Text(prefix, {
+            fontSize: 8, 
+            fontFamily: 'NanumSquareRound, Inter, sans-serif',
+            fontWeight: 'normal',
+            fill: isActiveNow ? '#ffffff' : '#000000',
+            left: 4,
+            top: yPos + 0.5,
+            originX: 'left', originY: 'top',
+            selectable: false,
+         });
+         statusObjects.push(labelText);
+
+         const vDivider = new fabric.Line([17, yPos, 17, yPos + 10], {
+            stroke: isActiveNow ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.1)',
+            strokeWidth: 0.5,
+            originX: 'left', originY: 'top',
+            selectable: false,
+         });
+         statusObjects.push(vDivider);
+
+         let info = '';
+         if (booking) {
+            if (canSeeDetails(booking)) {
+               const studentId = booking.profiles.username || '';
+               const name = booking.profiles.full_name || '';
+               info = studentId ? `${studentId} ${name}` : name;
+            } else {
+               info = `예약됨`;
+            }
+         }
+
+         const infoText = new fabric.Text(info, {
+            fontSize: 8, 
+            fontFamily: 'NanumSquareRound, Inter, sans-serif',
+            fontWeight: 'normal',
+            fill: isActiveNow ? '#ffffff' : '#000000',
+            left: 23, 
+            top: yPos,
+            originX: 'left', originY: 'top',
+            selectable: false,
+         });
+         statusObjects.push(infoText);
+
+         if (idx < sortedSessions.length - 1) {
+            const divider = new fabric.Line([4, yPos + 11.5, 68, yPos + 11.5], {
+               stroke: isActiveNow ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.08)',
+               strokeWidth: 0.5,
+               originX: 'left', originY: 'top',
+               selectable: false,
+            });
+            statusObjects.push(divider);
+         }
+      });
     }
 
-    const infoText = new fabric.IText(displayInfo, {
-      fontSize: 10,
-      textAlign: 'center',
-      originX: 'center', originY: 'center',
-      left: 36, top: 36,
-      fill: isActiveNow ? '#ffffff' : '#1C1C1E',
-      fontFamily: 'Inter, -apple-system', fontWeight: '600',
-      selectable: false,
-      opacity: isActiveNow ? 1 : 0.8
-    });
+     const selectionBorder = new fabric.Rect({
+       width: 74, height: 74,
+       rx: 8, ry: 8,
+       fill: 'transparent',
+       stroke: baseColor,
+       strokeWidth: 0,
+       left: -2, top: -2,
+       originX: 'left', originY: 'top',
+       selectable: false,
+       name: 'selectionBorder',
+       strokeUniform: true
+     });
 
-    // 4. Session Indicators (Bottom)
-    const indicators = sessList.map((sess, idx) => {
-      const isBooked = seatBookings.some(b => b.session_id === sess.id);
-      const isCurrent = sess.id === activeSession?.id;
-      
-      return new fabric.Rect({
-        left: 6 + (idx * 15), 
-        top: 60,
-        width: 12,
-        height: 4,
-        rx: 1, ry: 1,
-        fill: isBooked ? (isCurrent ? '#30D158' : (isActiveNow ? '#ffffff' : '#8E8E93')) : (isActiveNow ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.05)'),
-        stroke: isCurrent ? 'rgba(48, 209, 88, 0.5)' : null,
-        strokeWidth: isCurrent ? 1 : 0
-      });
-    });
-
-    const group = new fabric.Group([bg, numText, infoText, ...indicators], {
+    const group = new fabric.Group([bg, headerBg, numText, ...statusObjects, selectionBorder], {
       left: seatData.pos_x,
       top: seatData.pos_y,
+      originX: 'left', originY: 'top',
       angle: seatData.rotation,
       data: { ...seatData, seatBookings, activeSession },
       selectable: false,
@@ -299,7 +504,60 @@ const SeatBookingMap = ({ onSelectSeat }) => {
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full h-full relative overflow-hidden">
+    <div className="flex flex-col gap-4 w-full h-full relative overflow-hidden">
+      {/* Zone Selection Header - Hidden in Minimal Mode */}
+      {!minimal && (
+      <div className="flex items-center gap-4 px-1">
+        <div className="flex gap-[10px] m-[10px] mb-0 border-none shrink-0">
+          {zones.map(z => (
+            <button
+              key={z.id}
+              onClick={() => onZoneChange(z.id)}
+              className={`px-6 py-2 rounded-lg text-xs font-black transition-all ios-tap border-none outline-none ring-0 ${
+                selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
+              }`}
+            >
+              {z.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 text-ios-gray">
+          <Info className="w-3.5 h-3.5" />
+          <span className="text-[10px] font-bold">원하는 구역을 선택하고 좌석을 클릭해 주세요.</span>
+        </div>
+        
+        <div className="flex bg-gray-50 p-1 rounded-full border border-gray-100 items-center gap-1 ml-auto">
+          <button 
+            onClick={handlePrevOperatingDay}
+            className="p-1.5 hover:bg-white rounded-full transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          
+          <div className="relative group px-2 flex items-center gap-2 cursor-pointer">
+            <Calendar className="w-4 h-4 text-ios-indigo" />
+            <span className="text-[14px] font-black text-[#1C1C1E] whitespace-nowrap">
+              {format(parseISO(viewDate), 'yyyy-MM-dd (EEE)', { locale: ko })}
+            </span>
+            <input 
+              type="date" 
+              value={viewDate}
+              onChange={(e) => onDateChange(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer"
+            />
+          </div>
+
+          <button 
+            onClick={handleNextOperatingDay}
+            className="p-1.5 hover:bg-white rounded-full transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+      )}
+
       {loading && (
         <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-30 flex items-center justify-center">
           <div className="w-8 h-8 border-3 border-ios-indigo border-t-transparent rounded-full animate-spin"></div>
@@ -314,7 +572,7 @@ const SeatBookingMap = ({ onSelectSeat }) => {
         ref={containerRef} 
         className="flex-1 h-full relative overflow-hidden cursor-grab active:cursor-grabbing touch-none select-none scrollbar-hide"
       />
-      
+
     </div>
   );
 };

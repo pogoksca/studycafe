@@ -27,7 +27,7 @@ class ErrorBoundary extends React.Component {
           </pre>
           <button 
             onClick={() => window.location.reload()}
-            className="mt-6 px-6 py-3 bg-ios-indigo text-white rounded-[6px] font-black"
+            className="mt-6 px-6 py-3 bg-[#1C1C1E] text-white rounded-[6px] font-black"
           >
             Reload Application
           </button>

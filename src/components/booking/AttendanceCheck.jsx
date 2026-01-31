@@ -6,6 +6,13 @@ const AttendanceCheck = ({ user }) => {
   const [status, setStatus] = useState('idle'); // idle, locating, verified, error
   const [message, setMessage] = useState('');
 
+  const getKSTISOString = () => {
+    const now = new Date();
+    const kstOffset = 9 * 60 * 60 * 1000;
+    const kstTime = new Date(now.getTime() + kstOffset);
+    return kstTime.toISOString().replace('Z', '+09:00');
+  };
+
   const verifyLocation = async () => {
     setStatus('locating');
     setMessage('Verifying your location...');
@@ -19,40 +26,128 @@ const AttendanceCheck = ({ user }) => {
     navigator.geolocation.getCurrentPosition(async (position) => {
       const { latitude, longitude, accuracy } = position.coords;
       
-      // Fetch GPS settings from config
-      const { data: config } = await supabase
-        .from('configs')
-        .select('value')
-        .eq('key', 'gps_settings')
-        .single();
-
-      if (!config) {
+      // 1. Fetch current sessions to find active one and get zone_id
+      const { data: currentSessions } = await supabase
+        .from('sessions')
+        .select('*');
+      
+      if (!currentSessions) {
         setStatus('error');
-        setMessage('GPS 설정이 구성되지 않았습니다. 관리자에게 문의하세요.');
+        setMessage('세션 정보를 불러오는 중 오류가 발생했습니다.');
         return;
       }
 
-      const { lat: targetLat, lng: targetLng, radius } = config.value;
+      const now = new Date();
+      const currentTime = now.getHours().toString().padStart(2, '0') + ':' + 
+                         now.getMinutes().toString().padStart(2, '0') + ':00';
+      
+      const activeSession = currentSessions.find(s => 
+        currentTime >= s.start_time && currentTime <= s.end_time
+      );
 
-      // Haversine formula to calculate distance
+      if (!activeSession) {
+        setMessage('현재는 출석 인증 가능 시간이 아닙니다.');
+        setStatus('error');
+        return;
+      }
+
+      // 2. Fetch Zone Settings for the active session
+      const { data: zoneData } = await supabase
+        .from('zones')
+        .select('settings')
+        .eq('id', activeSession.zone_id)
+        .single();
+      
+      const zoneSettings = zoneData?.settings || {};
+      // Fallback for legacy or missing data
+      const targetPoints = zoneSettings.points || [
+          { 
+            lat: zoneSettings.latitude || 37.5665, 
+            lng: zoneSettings.longitude || 126.9780, 
+            name: '기본 지점' 
+          }
+      ];
+      const targetRadius = zoneSettings.radius || 100;
+
+      // 3. Verify Distance against ALL points
+      let isWithinRange = false;
+      let minDistance = Infinity;
+      let nearestPointBox = null;
+
       const R = 6371e3; // metres
-      const φ1 = latitude * Math.PI/180;
-      const φ2 = targetLat * Math.PI/180;
-      const Δφ = (targetLat-latitude) * Math.PI/180;
-      const Δλ = (targetLng-longitude) * Math.PI/180;
 
-      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                Math.cos(φ1) * Math.cos(φ2) *
-                Math.sin(Δλ/2) * Math.sin(Δλ/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      const distance = R * c; // in metres
+      targetPoints.forEach(point => {
+          const φ1 = latitude * Math.PI/180;
+          const φ2 = point.lat * Math.PI/180;
+          const Δφ = (point.lat-latitude) * Math.PI/180;
+          const Δλ = (point.lng-longitude) * Math.PI/180;
 
-      if (distance <= radius) {
+          const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                    Math.cos(φ1) * Math.cos(φ2) *
+                    Math.sin(Δλ/2) * Math.sin(Δλ/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const d = R * c;
+
+          if (d < minDistance) {
+              minDistance = d;
+              nearestPointBox = point;
+          }
+          if (d <= targetRadius) {
+              isWithinRange = true;
+          }
+      });
+
+      if (isWithinRange) {
         setStatus('verified');
-        setMessage('위치가 확인되었습니다! 출석 처리 중...');
         
-        // TODO: Record attendance in DB
-        setTimeout(() => setStatus('done'), 1500);
+        // --- Actual Attendance Recording Logic ---
+        try {
+
+          // 2. Check if student has a booking for today in this session
+          const today = now.toISOString().split('T')[0];
+          const { data: booking, error: bookingError } = await supabase
+            .from('bookings')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('date', today)
+            .eq('session_id', activeSession.id)
+            .maybeSingle();
+
+          if (bookingError || !booking) {
+            setMessage(`현재 '${activeSession.name}'에 예약된 내역이 없습니다.`);
+            setStatus('error');
+            return;
+          }
+
+          // 3. Record attendance
+          const startDateTime = new Date(`${today}T${activeSession.start_time}+09:00`);
+          const lateCutoff = new Date(startDateTime.getTime() + 10 * 60 * 1000); // 10 minutes grace
+          
+          const nowKSTISO = getKSTISOString();
+          const nowObj = new Date(nowKSTISO);
+          
+          const isLate = nowObj > lateCutoff;
+          const finalStatus = isLate ? 'late' : 'present';
+
+          const { error: attError } = await supabase
+            .from('attendance')
+            .upsert({
+              booking_id: booking.id,
+              status: finalStatus,
+              timestamp_in: nowKSTISO,
+              updated_at: new Date().toISOString()
+            }, { onConflict: 'booking_id' });
+
+          if (attError) throw attError;
+
+          setMessage(`'${activeSession.name}' 출석 체크가 완료되었습니다!`);
+          setTimeout(() => setStatus('done'), 1500);
+
+        } catch (err) {
+          console.error('Attendance recording error:', err);
+          setMessage('출석 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+          setStatus('error');
+        }
       } else {
         setStatus('error');
         
@@ -63,16 +158,17 @@ const AttendanceCheck = ({ user }) => {
             정확한 인증을 위해 반드시 '스마트폰'의 'GPS'를 켜고 시도해 주세요.`);
         } else {
           setMessage(`허용 구역 밖에 계십니다.
-            현재 위치와 약 ${Math.round(distance)}m 떨어져 있습니다.
-            (허용 반경: ${radius}m)
+            가장 가까운 '${nearestPointBox?.name || '인증 지점'}'과 약 ${Math.round(minDistance)}m 떨어져 있습니다.
+            (허용 반경: ${targetRadius}m)
             
             Tip: 건물 안에서는 GPS 오차가 발생할 수 있으니, 창가 쪽으로 이동하여 다시 시도해 주세요.`);
         }
         
         console.log('GPS Verification Debug:', {
           user: { lat: latitude, lng: longitude, accuracy },
-          target: { lat: targetLat, lng: targetLng, radius },
-          calculatedDistance: distance
+          nearestPoint: nearestPointBox,
+          minDistance,
+          targetRadius
         });
       }
     }, (error) => {
@@ -118,7 +214,7 @@ const AttendanceCheck = ({ user }) => {
           disabled={status === 'locating'}
           className={`w-full py-6 rounded-2xl font-black text-lg transition-all shadow-2xl ios-tap ${
             status === 'locating' ? 'bg-white/5 text-white/20' :
-            status === 'error' ? 'bg-ios-rose text-white shadow-ios-rose/30' :
+            status === 'error' ? 'bg-black text-white shadow-black/30' :
             'bg-white text-black'
           }`}
         >

@@ -31,6 +31,25 @@ const StudentManagement = () => {
         setLoading(false);
     };
 
+    const handleDownloadTemplate = () => {
+        // Create a worksheet with headers "이름" and "학번"
+        const ws = XLSX.utils.json_to_sheet([
+            { '이름': '', '학번': '' }
+        ]);
+        
+        // Fix column widths
+        ws['!cols'] = [
+            { wch: 15 }, // 이름
+            { wch: 15 }  // 학번
+        ];
+
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "양식");
+        
+        // Write file
+        XLSX.writeFile(wb, "학생_업로드_양식.xlsx");
+    };
+
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -120,8 +139,15 @@ const StudentManagement = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 text-[#1C1C1E] px-4 py-2.5 rounded-[6px] text-xs font-black transition-all border border-gray-100 cursor-pointer ios-tap">
-                        <Upload className="w-4 h-4 text-ios-indigo" />
+                    <button 
+                        onClick={handleDownloadTemplate}
+                        className="flex items-center gap-2 bg-white hover:bg-gray-50 text-[#1C1C1E] px-4 py-2.5 rounded-[6px] text-xs font-black transition-all border border-gray-200 ios-tap"
+                    >
+                        <FileDown className="w-4 h-4 text-ios-indigo" />
+                        업로드 양식
+                    </button>
+                    <label className="flex items-center gap-2 bg-[#1C1C1E] hover:bg-[#2C2C2E] text-white px-4 py-2.5 rounded-[6px] text-xs font-black transition-all border border-transparent cursor-pointer ios-tap shadow-sm">
+                        <Upload className="w-4 h-4 text-white" />
                         엑셀 업로드
                         <input type="file" className="hidden" accept=".xlsx,.xls" onChange={handleFileUpload} />
                     </label>
@@ -250,14 +276,14 @@ const StudentManagement = () => {
                                             <>
                                                 <button 
                                                     onClick={() => handleApproval(applicant, 'approved')}
-                                                    className="p-1.5 rounded-[4px] bg-ios-emerald/10 text-ios-emerald hover:bg-ios-emerald text-white transition-all ios-tap"
+                                                    className="p-1.5 rounded-[4px] bg-ios-emerald/10 text-ios-emerald hover:bg-[#1C1C1E] text-white transition-all ios-tap"
                                                     title="승인"
                                                 >
                                                     <Check className="w-3.5 h-3.5" />
                                                 </button>
                                                 <button 
                                                     onClick={() => setSelectedApplicant(applicant)}
-                                                    className="p-1.5 rounded-[4px] bg-ios-rose/10 text-ios-rose hover:bg-ios-rose text-white transition-all ios-tap"
+                                                    className="p-1.5 rounded-[4px] bg-ios-rose/10 text-ios-rose hover:bg-[#1C1C1E] text-white transition-all ios-tap"
                                                     title="거절"
                                                 >
                                                     <X className="w-3.5 h-3.5" />
@@ -302,7 +328,7 @@ const StudentManagement = () => {
                                 </button>
                                 <button 
                                     onClick={() => handleApproval(selectedApplicant, 'rejected', rejectionReason)}
-                                    className="w-full py-3 bg-ios-rose text-white rounded-[6px] text-xs font-black shadow-lg shadow-ios-rose/20 ios-tap"
+                                    className="w-full py-3 bg-[#1C1C1E] text-white rounded-[6px] text-xs font-black shadow-lg shadow-black/20 ios-tap"
                                 >
                                     거절 처리
                                 </button>

@@ -11,50 +11,36 @@ const FloorPlanEditor = () => {
   const [displayNumber, setDisplayNumber] = useState('');
   const [zoneName, setZoneName] = useState('A');
   const [zoneColor, setZoneColor] = useState('#5E5CE6');
+  const [zones, setZones] = useState([]);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [deletedIds, setDeletedIds] = useState([]); // Track deletions locally
   const [creationMode, setCreationMode] = useState(null); // 'structure' or null
-  const creationModeRef = useRef(null); // Ref to access state inside fabric listeners
-  const [drawStart, setDrawStart] = useState(null);
+  
+  // Refs for event handlers
+  const creationModeRef = useRef(null);
   const drawStartRef = useRef(null);
-  const [tempRect, setTempRect] = useState(null);
   const tempRectRef = useRef(null);
   const clipboardRef = useRef(null);
 
-  // Sync refs with state
+  // Sync state to ref for event handlers
   useEffect(() => {
     creationModeRef.current = creationMode;
   }, [creationMode]);
 
   useEffect(() => {
-    drawStartRef.current = drawStart;
-  }, [drawStart]);
-  
-  useEffect(() => {
-    tempRectRef.current = tempRect;
-  }, [tempRect]);
+    fetchZones();
+  }, []);
 
-  // Helper to get current layout state
-  const getCurrentState = () => {
-    if (!fabricRef.current) return [];
-    return fabricRef.current.getObjects().map(obj => ({
-      ...obj.data,
-      pos_x: Math.round(obj.left),
-      pos_y: Math.round(obj.top),
-      rotation: Math.round(obj.angle || 0),
-      width: Math.round(obj.width * obj.scaleX), // Capture baked dimensions
-      height: Math.round(obj.height * obj.scaleY)
-    }));
-  };
-
-  const saveToHistory = () => {
-    const state = getCurrentState();
-    setHistory(prev => [...prev.slice(-19), state]); // Keep last 20 steps
+  const fetchZones = async () => {
+    const { data } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+    if (data && data.length > 0) {
+      setZones(data);
+      setSelectedZoneId(data[0].id);
+    }
   };
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || !selectedZoneId) return;
     let isMounted = true;
     
     // Clean check
@@ -78,7 +64,12 @@ const FloorPlanEditor = () => {
 
     const loadSeats = async () => {
       setLoading(true);
-      const { data, error } = await supabase.from('seats').select('*').order('global_number', { ascending: true });
+      const { data, error } = await supabase
+        .from('seats')
+        .select('*')
+        .eq('zone_id', selectedZoneId)
+        .order('global_number', { ascending: true });
+      
       if (!isMounted) return;
 
       if (error) {
@@ -86,24 +77,34 @@ const FloorPlanEditor = () => {
       } else if (data && data.length > 0) {
         if (fabricRef.current) fabricRef.current.clear();
         
-        // Horizontal centering
-        const minX = Math.min(...data.map(s => s.pos_x));
-        const maxX = Math.max(...data.map(s => s.pos_x + (s.width || 72)));
-        const layoutWidth = maxX - minX;
+        // Filter valid data
+        const validSeats = data.filter(s => typeof s.pos_x === 'number' && typeof s.pos_y === 'number');
         
-        const parentWidth = containerRef.current?.clientWidth || layoutWidth;
-        const totalWidth = Math.max(layoutWidth, parentWidth);
-        const offsetX = (totalWidth - layoutWidth) / 2 - minX; 
-        
-        const minY = Math.min(...data.map(s => s.pos_y));
-        const maxY = Math.max(...data.map(s => s.pos_y + (s.height || 72)));
-        const layoutHeight = maxY - minY;
-        const offsetY = -minY; // Flush to top
-        const totalHeight = layoutHeight;
+        let offsetX = 0;
+        let offsetY = 0;
+        let totalWidth = 1000;
+        let totalHeight = 600;
+
+        if (validSeats.length > 0) {
+            // Horizontal centering
+            const minX = Math.min(...validSeats.map(s => s.pos_x));
+            const maxX = Math.max(...validSeats.map(s => s.pos_x + (s.width || 72)));
+            const layoutWidth = maxX - minX;
+            
+            const parentWidth = containerRef.current?.clientWidth || layoutWidth;
+            totalWidth = Math.max(layoutWidth + 100, parentWidth); // Add padding
+            offsetX = (totalWidth - layoutWidth) / 2 - minX; 
+            
+            const minY = Math.min(...validSeats.map(s => s.pos_y));
+            const maxY = Math.max(...validSeats.map(s => s.pos_y + (s.height || 72)));
+            const layoutHeight = maxY - minY;
+            offsetY = 20 - minY;
+            totalHeight = Math.max(layoutHeight + 100, 600);
+        }
 
         fabricRef.current.setDimensions({ width: totalWidth, height: totalHeight });
 
-        data.forEach(s => {
+        validSeats.forEach(s => {
           renderSeat({
             ...s,
             pos_x: s.pos_x + offsetX,
@@ -116,6 +117,12 @@ const FloorPlanEditor = () => {
           }
         });
         fabricRef.current.renderAll();
+      } else {
+        // Clear canvas if no data for zone
+        if (fabricRef.current) {
+          fabricRef.current.clear();
+          fabricRef.current.setDimensions({ width: 1000, height: 600 });
+        }
       }
       setLoading(false);
     };
@@ -618,7 +625,7 @@ const FloorPlanEditor = () => {
       canvas.dispose();
       fabricRef.current = null;
     };
-  }, []); // Empty dependencies - logic uses refs now
+  }, [selectedZoneId]); // Re-run when zone changes
 
   const createStructure = (x, y, w, h, label) => {
     const rect = new fabric.Rect({
@@ -959,6 +966,7 @@ const FloorPlanEditor = () => {
         const sNum = obj.data?.seatNumber || (isStructure ? `STR_${obj.data.id.slice(-8)}` : '0');
 
         const payload = {
+          zone_id: selectedZoneId, // CRITICAL: Link to selected zone
           pos_x: Math.round(obj.left), 
           pos_y: Math.round(obj.top), 
           rotation: Math.round(obj.angle || 0),
@@ -1080,6 +1088,21 @@ const FloorPlanEditor = () => {
       )}
       
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Zone Selection Header */}
+        <div className="flex gap-[10px] m-[10px] mb-4 inline-flex self-start">
+            {zones.map(z => (
+                <button
+                    key={z.id}
+                    onClick={() => setSelectedZoneId(z.id)}
+                    className={`px-6 py-2 rounded-lg text-xs font-black transition-all ios-tap border-none outline-none ring-0 ${
+                        selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
+                    }`}
+                >
+                    {z.name}
+                </button>
+            ))}
+        </div>
+
         <div className="flex-1 w-full bg-white rounded-t-[6px] rounded-b-none border-0 overflow-hidden p-2.5 pb-0">
           {/* 
               Canvas Host: Isolated from React reconciliation.

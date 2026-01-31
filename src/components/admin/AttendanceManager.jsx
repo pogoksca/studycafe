@@ -4,157 +4,380 @@ import { supabase } from '../../lib/supabase';
 import { Check, X, Clock, UserCheck, Download, Users } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-const AttendanceManager = () => {
+const AttendanceManager = ({ 
+  isMobileView = false,
+  externalZoneId = null,
+  externalDate = null,
+  externalSessionId = null
+}) => {
   const containerRef = useRef(null);
   const fabricRef = useRef(null);
-  const [activeSession, setActiveSession] = useState(1); // Default to Morning
+  const [zones, setZones] = useState([]);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
+  
+  // NEW: Date Selection State
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const [activeSession, setActiveSession] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({ present: 0, absent: 0, total: 0 });
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    fetchInitialData();
+  }, []);
+
+  // Sync props to internal state if they change (optional, but ensures consistency)
+  useEffect(() => {
+    if (externalZoneId) setSelectedZoneId(externalZoneId);
+  }, [externalZoneId]);
+
+  useEffect(() => {
+    if (externalDate) setSelectedDate(externalDate);
+  }, [externalDate]);
+
+  useEffect(() => {
+    if (externalSessionId) setActiveSession(externalSessionId);
+  }, [externalSessionId]);
+
+  const fetchInitialData = async () => {
+    setLoading(true);
+    const { data: zoneData } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+    if (zoneData && zoneData.length > 0) {
+      setZones(zoneData);
+      setSelectedZoneId(zoneData[0].id);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedZoneId) {
+      fetchSessions(selectedZoneId);
+    }
+  }, [selectedZoneId]);
+
+  const fetchSessions = async (zoneId) => {
+    const { data } = await supabase
+      .from('sessions')
+      .select('*')
+      .eq('zone_id', zoneId)
+      .order('start_time', { ascending: true });
+    
+    if (data) {
+      setSessions(data);
+      // Auto-select session logic:
+      // If Today -> Select active session based on time.
+      // If History -> Default to first or keep null? Let's default to first for consistent view.
+      
+      const today = new Date().toISOString().split('T')[0];
+      if (selectedDate === today) {
+          const now = new Date();
+          const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
+          const currentSess = data.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+          if (currentSess) setActiveSession(currentSess.id);
+          else if (data.length > 0) setActiveSession(data[0].id);
+      } else {
+          // For history, just default to first session if none selected, or keep selection if valid?
+          // Simpler to just reset to first to ensure valid view.
+          if (data.length > 0) setActiveSession(data[0].id);
+      }
+    }
+  };
+  
+  // Re-fetch when Date changes too
+  useEffect(() => {
+      // If we change date, we might want to re-eval active session logic or just reload data.
+      // fetchSessions handles auto-selection logic based on date. 
+      // But fetchSessions is dep on zone. 
+      // If only date changes, we should just reload data and maybe re-check session if today.
+      
+      const today = new Date().toISOString().split('T')[0];
+      if (selectedDate === today && sessions.length > 0) {
+          const now = new Date();
+          const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
+          const currentSess = sessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+          if (currentSess) setActiveSession(currentSess.id);
+      }
+      // If date changed to history, we stay on current activeSession ID (if valid) or maybe user wants to see same session on different day.
+      // So no forced change of session unless invalid.
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (!containerRef.current || !selectedZoneId || !activeSession) return;
     let isMounted = true;
     
-    // Clean check
     if (fabricRef.current) {
       fabricRef.current.dispose();
     }
 
-    // DOM Isolation: Manually create and append canvas
     containerRef.current.innerHTML = '';
     const canvasEl = document.createElement('canvas');
     containerRef.current.appendChild(canvasEl);
 
     const canvas = new fabric.Canvas(canvasEl, {
-      width: 1000,
-      height: 1100,
       backgroundColor: 'transparent',
       selection: false,
+      allowTouchScrolling: true,
     });
     fabricRef.current = canvas;
 
     const init = async () => {
-      const sess = await fetchSessions();
-      if (!isMounted) return;
-      await loadAttendanceData(sess);
+      await loadAttendanceData(sessions);
     };
 
     init();
 
+    let isPanning = false;
+    let startX, startY, startScrollLeft, startScrollTop;
+
     canvas.on('mouse:down', (options) => {
-      if (options.target && options.target.data) {
-        toggleAttendance(options.target);
+      const evt = options.e;
+      const target = options.target;
+      
+      // If we clicked on a seat's action button, don't start panning
+      const hitButton = options.subTargets?.find(o => o.name === 'actionButton' || o.name === 'actionLabel');
+      if (hitButton) {
+          toggleAttendance(target);
+          return;
+      }
+
+      isPanning = true;
+      const pos = evt.type === 'touchstart' ? evt.touches[0] : evt;
+      startX = pos.clientX;
+      startY = pos.clientY;
+      
+      const scrollParent = containerRef.current?.closest('.mobile-seatmap-container') || containerRef.current?.parentElement;
+      if (scrollParent) {
+        startScrollLeft = scrollParent.scrollLeft;
+        startScrollTop = scrollParent.scrollTop;
       }
     });
 
+    canvas.on('mouse:move', (options) => {
+      if (!isPanning) return;
+      
+      const evt = options.e;
+      const pos = evt.type === 'touchmove' ? evt.touches[0] : evt;
+      const dx = pos.clientX - startX;
+      const dy = pos.clientY - startY;
+
+      const scrollParent = containerRef.current?.closest('.mobile-seatmap-container') || containerRef.current?.parentElement;
+      if (scrollParent) {
+        scrollParent.scrollLeft = startScrollLeft - dx;
+        scrollParent.scrollTop = startScrollTop - dy;
+      }
+    });
+
+    canvas.on('mouse:up', () => {
+      isPanning = false;
+    });
+
+    canvas.on('mouse:out', () => {
+      // isPanning = false; // Optional: stop panning if mouse leaves canvas
+    });
+
+    // Real-time subscription for attendance updates
+    const channel = supabase
+      .channel('attendance_changes')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'attendance' 
+      }, () => {
+        // Reload data when attendance changes
+        loadAttendanceData(sessions);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setIsRealtimeConnected(true);
+        } else {
+          setIsRealtimeConnected(false);
+        }
+      });
+
     return () => {
       isMounted = false;
+      supabase.removeChannel(channel);
       canvas.dispose();
       fabricRef.current = null;
     };
-  }, [activeSession]);
+  }, [activeSession, selectedZoneId, selectedDate, externalSessionId, externalZoneId, externalDate, sessions]);
 
-  const fetchSessions = async () => {
-    const { data } = await supabase.from('sessions').select('*');
-    if (data) {
-      setSessions(data);
-      return data;
-    }
-    return [];
-  };
-
+ 
   const loadAttendanceData = async (sessList) => {
-    if (!fabricRef.current || !canvasRef.current) return;
+    if (!fabricRef.current || !selectedZoneId || !activeSession) return;
     setLoading(true);
-    const { data: seats } = await supabase.from('seats').select('*').order('global_number', { ascending: true });
-    const today = new Date().toISOString().split('T')[0];
-    const { data: attendanceData } = await supabase
-      .from('bookings')
-      .select('*, attendance(*), profiles(full_name)')
-      .eq('date', today)
-      .eq('session_id', activeSession);
 
-    if (seats && seats.length > 0 && fabricRef.current) {
-      fabricRef.current.clear();
-      
-      // Horizontal centering
-      const minX = Math.min(...seats.map(s => s.pos_x));
-      const maxX = Math.max(...seats.map(s => s.pos_x + 72));
-      const layoutWidth = maxX - minX;
-      const offsetX = (1000 - layoutWidth) / 2 - minX;
+    // Fetch seats ONLY for selected zone
+    const { data: seats } = await supabase
+      .from('seats')
+      .select('*')
+      .eq('zone_id', selectedZoneId)
+      .order('global_number', { ascending: true });
 
-      // Vertical dynamic height with 20px padding
-      const minY = Math.min(...seats.map(s => s.pos_y));
-      const maxY = Math.max(...seats.map(s => s.pos_y + 72));
-      const layoutHeight = maxY - minY;
-      const offsetY = 20 - minY;
-      const containerHeight = containerRef.current?.clientHeight || 0;
-      const totalHeight = Math.max(layoutHeight + 40, containerHeight);
+    // Use SELECTED DATE instead of hardcoded today
+    const targetDate = selectedDate; 
+      const todayKST = getKSTISOString().split('T')[0];
+      const isToday = targetDate === todayKST;
 
-      if (fabricRef.current) {
-        fabricRef.current.setDimensions({ width: 1000, height: totalHeight });
+      // FETCH 1: All bookings for TARGET DATE
+      const { data: allDailyBookings } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          profiles(full_name, username),
+          attendance(id, status, timestamp_in, timestamp_out)
+        `)
+        .eq('date', targetDate);
+
+      // --- AUTO-CHECKOUT LOGIC ---
+      if (allDailyBookings && allDailyBookings.length > 0) {
+          const nowKSTObj = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+          const currentTimeStr = nowKSTObj.toISOString().split('T')[1].substring(0, 8); // HH:mm:ss
+          
+          const autoCheckouts = [];
+          allDailyBookings.forEach(b => {
+              const sess = sessList.find(s => s.id === b.session_id);
+              if (!sess) return;
+              
+              const att = Array.isArray(b.attendance) ? b.attendance[0] : b.attendance;
+              if (att && (att.status === 'present' || att.status === 'late') && !att.timestamp_out) {
+                  // If session is ended and it's today (or any past session)
+                  const sessionEndTime = sess.end_time.length === 5 ? sess.end_time + ':00' : sess.end_time;
+                  if (targetDate < todayKST || (isToday && sessionEndTime < currentTimeStr)) {
+                      autoCheckouts.push({
+                          id: att.id,
+                          timestamp_out: `${targetDate}T${sessionEndTime}+09:00`,
+                          updated_at: new Date().toISOString()
+                      });
+                  }
+              }
+          });
+
+          if (autoCheckouts.length > 0) {
+              const { error: batchErr } = await supabase.from('attendance').upsert(autoCheckouts);
+              if (!batchErr) {
+                  // Update local records to reflect auto-checkout without full re-fetch
+                  autoCheckouts.forEach(update => {
+                      const b = allDailyBookings.find(db => {
+                          const attId = Array.isArray(db.attendance) ? db.attendance[0]?.id : db.attendance?.id;
+                          return attId === update.id;
+                      });
+                      if (b) {
+                          if (Array.isArray(b.attendance)) b.attendance[0].timestamp_out = update.timestamp_out;
+                          else b.attendance.timestamp_out = update.timestamp_out;
+                      }
+                  });
+              }
+          }
       }
 
-      const now = new Date();
-      const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
-      const actualActiveSession = sessList?.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+      if (fabricRef.current) fabricRef.current.clear();
 
-      // Filter for stats counting (only real seats)
-      const realSeats = seats.filter(s => s.type !== 'structure');
+      // 1. Calculate Bounds
+      const allItems = seats || [];
+      if (allItems.length === 0) {
+        setLoading(false);
+        return;
+      }
       
+      const validX = allItems.map(s => s.pos_x).filter(x => typeof x === 'number' && !isNaN(x));
+      const validY = allItems.map(s => s.pos_y).filter(y => typeof y === 'number' && !isNaN(y));
+
+      if (validX.length === 0 || validY.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      const minX = Math.min(...validX);
+      const maxX = Math.max(...allItems.map(s => (s.pos_x + (s.width || 72))).filter(x => !isNaN(x)));
+      const minY = Math.min(...validY);
+      const maxY = Math.max(...allItems.map(s => (s.pos_y + (s.height || 72))).filter(y => !isNaN(y)));
+
+      const layoutWidth = maxX - minX;
+      const layoutHeight = maxY - minY;
+
+      // 2. Set Dynamic Canvas Dimensions with 20px Padding
+      const canvasWidth = layoutWidth + 40;
+      const canvasHeight = layoutHeight + 40;
+      
+      // Calculate active offsets to center/fit
+      const offsetX = 20 - minX;
+      const offsetY = 20 - minY;
+
+      if (fabricRef.current) {
+        fabricRef.current.setDimensions({ width: canvasWidth, height: canvasHeight });
+        if (containerRef.current) {
+          containerRef.current.style.width = `${canvasWidth}px`;
+          containerRef.current.style.height = `${canvasHeight}px`;
+        }
+      }
+
+      // Active Session Object finding (logic depends on if today)
+      let actualActiveSession = sessList?.find(s => s.id === activeSession);
+      if (!actualActiveSession && isToday) {
+          const now = new Date();
+          const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
+          actualActiveSession = sessList?.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+      }
+
       let presentCount = 0;
-      
-      // Iterate over ALL objects (including structures) for rendering
+      const activeSessionBookings = allDailyBookings?.filter(b => b.session_id === activeSession) || [];
+      const reservedCount = activeSessionBookings.length;
+
       seats.forEach(seat => {
-        // Skip logic for structures, just render
         if (seat.type === 'structure') {
-           renderSeat(seat, null, null, [], null, sessList);
+           renderSeat({
+             ...seat,
+             pos_x: seat.pos_x + offsetX,
+             pos_y: seat.pos_y + offsetY
+           }, null, null, [], null, sessList, false, isToday);
            return; 
         }
 
-        const seatBookings = attendanceData?.filter(b => b.seat_id === seat.id) || [];
+        const seatBookings = allDailyBookings?.filter(b => b.seat_id === seat.id) || [];
         const currentBooking = seatBookings.find(b => b.session_id === activeSession);
-        const status = currentBooking?.attendance[0]?.status || 'absent';
         
-        if (status === 'present') presentCount++;
+        const attRecord = Array.isArray(currentBooking?.attendance) ? currentBooking.attendance[0] : (currentBooking?.attendance || null);
+        let status = attRecord?.status || 'absent';
+        
+        // Local Override for Expired Sessions (Visual Consistency) - Only if Today and no record
+        if (isToday && currentBooking && !attRecord && activeSession && sessList) {
+             const manualSessionObj = sessList.find(s => s.id === activeSession);
+             if (manualSessionObj) {
+                  const now = new Date();
+                  const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0') + ':00';
+                  if (manualSessionObj.end_time < currentTime) {
+                     status = 'absent';
+                  }
+             }
+        }
+
+        const hasAnyBookingToday = seatBookings.length > 0;
+        
+        if (currentBooking && status === 'present') presentCount++;
         
         renderSeat({
           ...seat,
           pos_x: seat.pos_x + offsetX,
           pos_y: seat.pos_y + offsetY
-        }, currentBooking, status, seatBookings, actualActiveSession, sessList);
+        }, currentBooking, status, seatBookings, actualActiveSession, sessList, hasAnyBookingToday, isToday);
       });
 
       setStats({
         present: presentCount,
-        absent: realSeats.length - presentCount,
-        total: realSeats.length
+        absent: reservedCount - presentCount,
+        total: reservedCount,
+        rate: reservedCount > 0 ? Math.round((presentCount / reservedCount) * 100) : 0
       });
-    }
 
-    if (fabricRef.current && canvasRef.current) {
-      fabricRef.current.on('mouse:wheel', (opt) => {
-        if (!fabricRef.current || !canvasRef.current) return;
-        const delta = opt.e.deltaY;
-        const vpt = fabricRef.current.viewportTransform;
-        vpt[5] -= delta;
-        
-        const canvasHeight = fabricRef.current.getHeight();
-        const vptHeight = containerRef.current?.clientHeight || 0;
-        if (vpt[5] > 0) vpt[5] = 0;
-        if (vptHeight > 0 && vpt[5] < -(canvasHeight - vptHeight)) vpt[5] = -(canvasHeight - vptHeight);
-
-        fabricRef.current.requestRenderAll();
-        opt.e.preventDefault();
-        opt.e.stopPropagation();
-      });
-    }
+    // Native scrolling handled by container
 
     setLoading(false);
   };
 
-  const renderSeat = (seatData, booking, status, seatBookings, activeSessionObj, sessList) => {
+  const renderSeat = (seatData, booking, status, seatBookings, activeSessionObj, sessList, hasAnyBookingToday, isToday) => {
     // 0. Handle Structural Elements
     if (seatData.type === 'structure') {
       const rect = new fabric.Rect({
@@ -174,10 +397,6 @@ const AttendanceManager = () => {
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
         selectable: false,
       });
-      
-      // Handle Text Scaling for Structures (same as Editor)
-      // Actually we just render static here, no scaling needed usually unless we want perfection.
-      // But we must group them properly.
 
       const group = new fabric.Group([rect, text], {
         left: seatData.pos_x,
@@ -185,86 +404,279 @@ const AttendanceManager = () => {
         angle: seatData.rotation,
         selectable: false,
         evented: false, 
-        data: { ...seatData } // Pass data just in case
+        data: { ...seatData } 
       });
       
       fabricRef.current.add(group);
       return;
     }
 
-    const isBooked = !!booking;
-    
+    const isActiveNow = !!booking;
+    const isBookedToday = hasAnyBookingToday; 
     const baseColor = seatData.zone_color || '#5E5CE6';
-    const color = status === 'present' ? '#30D158' : (isBooked ? '#FF9F0A' : '#1C1C1E'); 
 
-    const rect = new fabric.Rect({
-      fill: isBooked ? color : baseColor,
-      opacity: isBooked ? 1 : 0.25,
-      width: 72,
-      height: 72,
+    // 1. Background Square
+    const bg = new fabric.Rect({
+      fill: '#FFFFFF',
+      width: 71, 
+      height: 71,
       rx: 6, ry: 6,
-      stroke: status === 'present' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.1)',
-      strokeWidth: 2,
-    });
-
-    const text = new fabric.IText(seatData.display_number || seatData.seat_number, {
-      fontSize: 12,
-      left: 6, top: 6,
-      fill: isBooked ? '#ffffff' : '#48484A',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: '900',
+      stroke: '#E5E5EA',
+      strokeWidth: 1,
+      left: 0.5, top: 0.5,
+      originX: 'left', originY: 'top',
       selectable: false,
     });
 
-    const nameText = new fabric.IText(booking?.profiles?.full_name || (isBooked ? 'Reserved' : ''), {
+    // 2. Seat Number Header Area (Roof)
+    const headerBg = new fabric.Path('M 0 6 Q 0 0 6 0 L 66 0 Q 72 0 72 6 L 72 18 L 0 18 z', {
+      fill: baseColor,
+      strokeWidth: 0,
+      left: 0, top: 0,
+      originX: 'left', originY: 'top',
+      selectable: false,
+    });
+
+    // 3. Status Dot
+    let visualItems = [bg, headerBg];
+    
+    if (isActiveNow) {
+        // Find attendance record in a robust way
+        const att = Array.isArray(booking?.attendance) ? booking.attendance[0] : (booking?.attendance || null);
+        const isActuallyPresent = (status === 'present' || status === 'late') && !att?.timestamp_out;
+
+        const dotColor = isActuallyPresent ? '#00FF00' : '#FF3B30';
+        const statusDot = new fabric.Circle({
+            radius: 3,
+            fill: dotColor,
+            left: 58, top: 9,
+            originX: 'center', originY: 'center',
+            selectable: false,
+            stroke: 'rgba(255,255,255,0.8)',
+            strokeWidth: 1.5
+        });
+        visualItems.push(statusDot);
+    }
+
+    // 4. Seat Number Text
+    const numText = new fabric.IText(seatData.display_number || seatData.seat_number, {
       fontSize: 10,
-      textAlign: 'center',
-      originX: 'center', originY: 'center',
-      left: 36, top: 36,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: '900',
       fill: '#ffffff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: '600',
+      left: 36, top: 9, 
+      originX: 'center', originY: 'center',
       selectable: false,
     });
+    visualItems.push(numText);
 
-    // 4 Session Indicators
-    const indicators = sessList.map((sess, idx) => {
-      const isSessBooked = seatBookings?.some(b => b.session_id === sess.id);
-      const isSessActive = sess.id === activeSessionObj?.id;
-      
-      return new fabric.Rect({
-        left: 6 + (idx * 15), 
-        top: 60,
-        width: 12,
-        height: 4,
-        rx: 1, ry: 1,
-        fill: isSessBooked ? (isSessActive ? '#30D158' : '#ffffff') : 'rgba(255,255,255,0.1)',
-        selectable: false
-      });
-    });
+    // 5. Occupant Info & Split Buttons or Empty Label
+    if (isActiveNow) {
+        const profile = booking?.profiles;
+        const displayName = profile ? `${profile.username ? profile.username + ' ' : ''}${profile.full_name}` : '학적 정보 없음';
+        
+        const nameText = new fabric.IText(displayName, {
+            fontSize: 10,
+            textAlign: 'center',
+            originX: 'center', originY: 'center',
+            left: 36, top: 34, 
+            fill: '#1C1C1E', 
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
+            selectable: false,
+        });
+        visualItems.push(nameText);
 
-    const group = new fabric.Group([rect, text, nameText, ...indicators], {
+        const att = Array.isArray(booking?.attendance) ? booking.attendance[0] : (booking?.attendance || null);
+        const hasCheckedOut = !!att?.timestamp_out;
+        const isCurrentlyLearning = (status === 'present' || status === 'late') && !hasCheckedOut;
+        
+        // Full-Cell Split Buttons Logic (3 States)
+        let leftLabelStr = '미출석';
+        let rightLabelStr = '출석처리';
+        let leftLabelColor = '#8E8E93';
+        let leftBgFill = '#F2F2F7';
+        let rightBgFill = baseColor;
+        let rightTextColor = '#FFFFFF';
+        let hasStroke = false;
+
+        if (isCurrentlyLearning) {
+            leftLabelStr = '학습중';
+            rightLabelStr = '퇴실';
+            leftLabelColor = '#FFFFFF';
+            leftBgFill = baseColor;
+            rightBgFill = '#FFFFFF';
+            rightTextColor = baseColor;
+            hasStroke = true;
+        } else if (hasCheckedOut) {
+            leftLabelStr = '학습종료';
+            rightLabelStr = '결석처리';
+            leftLabelColor = '#1C1C1E'; // iOS default label color for better readability
+            leftBgFill = '#F2F2F7';
+            rightBgFill = baseColor; // Use zone color for the "Undo" action to stand out
+            rightTextColor = '#FFFFFF';
+        }
+
+        const leftPath = 'M 0 50 L 36 50 L 36 72 L 6 72 Q 0 72 0 66 Z';
+        const leftBg = new fabric.Path(leftPath, {
+            fill: leftBgFill,
+            selectable: false,
+        });
+
+        const leftText = new fabric.IText(leftLabelStr, {
+            fontSize: 8,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
+            fill: leftLabelColor,
+            originX: 'center', originY: 'center',
+            left: 18, top: 61,
+            selectable: false,
+        });
+
+        const rightPath = 'M 36 50 L 72 50 L 72 66 Q 72 72 66 72 L 36 72 Z';
+        const rightBg = new fabric.Path(rightPath, {
+            fill: rightBgFill,
+            stroke: hasStroke ? baseColor : null,
+            strokeWidth: hasStroke ? 1 : 0,
+            selectable: false,
+            hoverCursor: 'pointer',
+            name: 'actionButton'
+        });
+
+        const rightText = new fabric.IText(rightLabelStr, {
+            fontSize: 8,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
+            fill: rightTextColor,
+            originX: 'center', originY: 'center',
+            left: 54, top: 61,
+            selectable: false,
+            name: 'actionLabel'
+        });
+
+        visualItems.push(leftBg, leftText, rightBg, rightText);
+    } else {
+        // EMPTY or RESERVED FOR OTHER SESSION
+        const emptyLabel = new fabric.IText('공석', {
+            fontSize: 12,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
+            fill: '#E5E5EA', // Slightly darker for visibility in dimmed tiers
+            left: 36, top: 34,
+            originX: 'center', originY: 'center',
+            selectable: false,
+        });
+        
+        const footerPath = 'M 0 50 L 72 50 L 72 66 Q 72 72 66 72 L 6 72 Q 0 72 0 66 Z';
+        const footerBg = new fabric.Path(footerPath, {
+            fill: '#F2F2F7',
+            opacity: 0.3,
+            selectable: false,
+        });
+        
+        const footerText = new fabric.IText('-', {
+            fontSize: 10,
+            fill: '#AEAEB2', // Visible gray
+            left: 36, top: 61,
+            originX: 'center', originY: 'center',
+            selectable: false,
+        });
+        
+        visualItems.push(emptyLabel, footerBg, footerText);
+    }
+
+    // Determine Group Opacity based on Tiers
+    let groupOpacity = 1;
+    if (!isActiveNow) {
+        groupOpacity = isBookedToday ? 0.4 : 0.15;
+    }
+
+    const group = new fabric.Group(visualItems, {
       left: seatData.pos_x,
       top: seatData.pos_y,
+      opacity: groupOpacity,
       angle: seatData.rotation,
       data: { ...seatData, booking, status },
       selectable: false,
-      hoverCursor: isBooked ? 'pointer' : 'default'
+      hoverCursor: isActiveNow ? 'pointer' : 'default',
+      subTargetCheck: true 
     });
 
     fabricRef.current.add(group);
   };
+  
+  // Helper to change date
+  const changeDate = (days) => {
+      const date = new Date(selectedDate);
+      date.setDate(date.getDate() + days);
+      setSelectedDate(date.toISOString().split('T')[0]);
+  };
+
+  // Helper for KST Timestamp
+  const getKSTISOString = () => {
+    const now = new Date();
+    const kstOffset = 9 * 60 * 60 * 1000;
+    const kstTime = new Date(now.getTime() + kstOffset);
+    return kstTime.toISOString().replace('Z', '+09:00');
+  };
 
   const toggleAttendance = async (group) => {
-    const { booking, status } = group.data;
+    const { booking, status: currentStatus } = group.data;
     if (!booking) return;
+    
+    // Find session for time checks
+    const session = sessions.find(s => s.id === booking.session_id);
+    if (!session) return;
 
-    const newStatus = status === 'present' ? 'absent' : 'present';
-    const { error } = await supabase.from('attendance').upsert({
-      booking_id: booking.id,
-      status: newStatus,
-      timestamp_in: newStatus === 'present' ? new Date().toISOString() : null
-    }, { onConflict: 'booking_id' });
+    const att = Array.isArray(booking.attendance) ? booking.attendance[0] : (booking.attendance || null);
+    const hasCheckedOut = !!att?.timestamp_out;
+    const isCurrentlyLearning = (currentStatus === 'present' || currentStatus === 'late') && !hasCheckedOut;
 
-    if (!error) loadAttendanceData();
+    if (isCurrentlyLearning) {
+        // ACTION: Check Out (Manual)
+        const { error } = await supabase.from('attendance')
+            .update({
+                timestamp_out: getKSTISOString(),
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', att.id);
+
+        if (error) console.error('Error during check-out:', error);
+        if (!error) await loadAttendanceData(sessions); 
+    } else if (hasCheckedOut) {
+        // ACTION: Reset to Absent (The "결석처리" button)
+        const { error } = await supabase.from('attendance')
+            .update({
+                status: 'absent',
+                timestamp_in: null,
+                timestamp_out: null,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', att.id);
+
+        if (error) console.error('Error during reset to absent:', error);
+        if (!error) await loadAttendanceData(sessions);
+    } else {
+        // ACTION: Check In (Admin/Staff always 'present' and fixed start time)
+        const sessionStartTime = session?.start_time || '00:00:00';
+        const payload = {
+            booking_id: booking.id,
+            status: 'present', // No 'late' from admin/teacher
+            timestamp_in: `${selectedDate}T${sessionStartTime}${sessionStartTime.length === 5 ? ':00' : ''}+09:00`,
+            timestamp_out: null, 
+            updated_at: new Date().toISOString()
+        };
+
+        // If there's an existing row (like 'absent'), include its ID for a solid update
+        if (att?.id) {
+            payload.id = att.id;
+        }
+
+        const { error } = await supabase.from('attendance')
+            .upsert(payload, { onConflict: 'booking_id' });
+        
+        if (error) {
+            console.error('Error during attendance upsert:', error);
+        } else {
+            // Force data reload and redraw - await to ensure sync
+            await loadAttendanceData(sessions); 
+        }
+    }
   };
 
   const exportToExcel = () => {
@@ -273,94 +685,118 @@ const AttendanceManager = () => {
       '좌석번호': obj.data.display_number,
       '학생명': obj.data.booking?.profiles?.full_name || '없음',
       '상태': obj.data.status === 'present' ? '출석' : '결석',
-      '구역': obj.data.zone_name
+      '구역': obj.data.zone_name,
+      '날짜': selectedDate
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "출석부");
-    XLSX.writeFile(wb, `출석부_${new Date().toISOString().split('T')[0]}.xlsx`);
+    XLSX.writeFile(wb, `출석부_${selectedDate}.xlsx`);
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full h-full p-0">
-      <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-        <div className="flex bg-gray-50 p-1 rounded-[6px] border border-gray-100">
-          {sessions.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSession(s.id)}
-              className={`px-6 py-2 rounded-[6px] text-[10px] font-black transition-all duration-300 ios-tap ${
-                activeSession === s.id ? 'bg-white text-ios-indigo shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E]'
-              }`}
-            >
-              {s.name.toUpperCase()}
-            </button>
-          ))}
-        </div>
+    <div className={`flex flex-col gap-4 w-full ${isMobileView ? 'min-h-fit' : 'h-full'} pt-[10px]`}>
+      {!isMobileView && (
+        <>
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between px-2">
+            <div className="flex items-center gap-4 ml-[10px] mt-[10px]">
+              {/* Zone Selection */}
+              <div className="flex gap-[10px]">
+                {zones.map(z => (
+                  <button
+                    key={z.id}
+                    onClick={() => setSelectedZoneId(z.id)}
+                    className={`h-8 px-4 rounded-[8px] text-[11px] font-black transition-all ios-tap flex items-center justify-center border-none outline-none ring-0 ${
+                      selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
+                    }`}
+                  >
+                    {z.name}
+                  </button>
+                ))}
+              </div>
 
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={exportToExcel}
-            className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 text-[#1C1C1E] px-4 py-2 rounded-[6px] text-xs font-black transition-all border border-gray-100 ios-tap"
-          >
-            <Download className="w-4 h-4 text-ios-blue" /> 명단 저장
-          </button>
-          <div className="bg-white px-4 py-2 rounded-[6px] text-xs font-black shadow-sm border border-gray-100 flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-ios-indigo animate-pulse" />
-            LIVE
+              {/* Date Selection - NEW */}
+              <div className="flex items-center bg-gray-100 p-0.5 rounded-[8px] border border-gray-200 h-8">
+                 <button 
+                    onClick={() => changeDate(-1)}
+                    className="h-7 px-2.5 rounded-[6px] hover:bg-white text-ios-gray transition-all text-[12px] flex items-center justify-center"
+                 >
+                    &lt;
+                 </button>
+                 <span className="h-7 px-3 text-[11px] font-black min-w-[90px] text-center flex items-center justify-center">
+                    {selectedDate} ({['일', '월', '화', '수', '목', '금', '토'][new Date(selectedDate).getDay()]})
+                 </span>
+                 <button 
+                    onClick={() => changeDate(1)}
+                    className="h-7 px-2.5 rounded-[6px] hover:bg-white text-ios-gray transition-all text-[12px] flex items-center justify-center"
+                 >
+                    &gt;
+                 </button>
+              </div>
+
+              {/* Session Selection */}
+              <div className="flex bg-gray-100 pt-[3px] pb-[4px] px-0.5 rounded-[8px] border border-gray-200 h-8">
+                {sessions.map(s => (
+                  <button
+                    key={s.id}
+                    onClick={() => setActiveSession(s.id)}
+                    className={`h-[25px] px-5 rounded-[6px] text-[10px] font-black transition-all duration-300 ios-tap flex items-center justify-center ${
+                      activeSession === s.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-gray-200/50'
+                    }`}
+                  >
+                    {s.name.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 mr-[10px] mt-[10px]">
+              <button 
+                onClick={exportToExcel}
+                className="flex items-center gap-2 bg-gray-50 hover:bg-gray-100 text-[#1C1C1E] h-8 px-4 rounded-[8px] text-[11px] font-black transition-all border border-gray-100 ios-tap"
+              >
+                <Download className="w-3.5 h-3.5 text-ios-blue" /> 출석부
+              </button>
+              <div className="bg-white h-8 px-3 rounded-[8px] shadow-sm border border-gray-100 flex items-center justify-center" title={isRealtimeConnected ? "실시간으로 출결 현황이 업데이트 중입니다." : "실시간 연결 시도 중..."}>
+                <div className={`w-2 h-2 rounded-full shrink-0 border border-white shadow-sm transition-all duration-500 ${isRealtimeConnected ? 'bg-emerald-500 animate-pulse shadow-emerald-500/50' : 'bg-rose-500 opacity-80'}`} />
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+          
+          {/* Attendance Stats Badges - RELOCATED TO NEW ROW */}
+          <div className="flex items-center gap-2 px-2 ml-[10px]">
+            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-[8px]">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="text-[10px] font-black text-emerald-700">출석 {stats.present}</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-[8px]">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              <span className="text-[10px] font-black text-rose-700">결석 {stats.absent}</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-[8px]">
+                <Users className="w-3 h-3 text-ios-gray" />
+                <span className="text-[10px] font-black text-ios-gray">전체 {stats.total}</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-ios-indigo/5 border border-ios-indigo/10 px-3 py-1.5 rounded-[8px]">
+                <span className="text-[10px] font-black text-ios-indigo">출석률 {stats.rate}%</span>
+            </div>
+          </div>
+        </>
+      )}
 
-      <div className="flex-1 flex flex-col xl:flex-row gap-6 w-full overflow-hidden">
-        <div className="flex-1 flex flex-col overflow-hidden relative">
+      <div className={`${isMobileView ? 'w-full' : 'flex-1 flex flex-col w-full'} overflow-hidden relative`}>
         {loading && (
           <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-30 flex items-center justify-center pointer-events-none">
             <div className="w-8 h-8 border-3 border-ios-indigo border-t-transparent rounded-full animate-spin"></div>
           </div>
         )}
         
-        <div className="flex-1 w-full bg-white rounded-t-[6px] rounded-b-none border-0 overflow-hidden p-2.5 pb-0">
-          {/* 
-              Canvas Host: Isolated from React reconciliation.
-              Fabric.js will wrap the manually injected canvas here.
-          */}
+        <div className={`${isMobileView ? 'w-full' : 'flex-1 w-full'} bg-white rounded-t-[6px] rounded-b-none border-0 overflow-hidden p-2.5 pb-0`}>
           <div 
             ref={containerRef} 
-            className="flex-1 h-full relative overflow-hidden cursor-grab active:cursor-grabbing touch-none select-none scrollbar-hide"
+            className={`relative overflow-hidden cursor-grab active:cursor-grabbing select-none scrollbar-hide ${isMobileView ? 'w-full min-h-[600px] h-auto touch-action-none' : 'flex-1 h-full'}`}
+            style={isMobileView ? { touchAction: 'none' } : {}}
           />
-        </div>
-      </div>
-
-        <div className="w-full xl:w-80 h-full overflow-y-auto scrollbar-hide space-y-6">
-          <div className="bg-white rounded-[6px] border border-gray-100 p-6 space-y-6 shadow-sm">
-            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-ios-gray flex items-center gap-2">
-              <Users className="w-3.5 h-3.5 text-ios-blue" /> 실시간 출결 현황
-            </h4>
-            <div className="grid grid-cols-1 gap-4">
-              <div className="bg-emerald-50 border border-emerald-100 p-5 rounded-[6px]">
-                <p className="text-[9px] uppercase font-black text-ios-emerald mb-1 tracking-widest">출석 인원</p>
-                <p className="text-4xl font-black text-[#1C1C1E]">{stats.present}<span className="text-sm text-ios-emerald/70 ml-1">명</span></p>
-              </div>
-              <div className="bg-rose-50 border border-rose-100 p-5 rounded-[6px]">
-                <p className="text-[9px] uppercase font-black text-ios-rose mb-1 tracking-widest">결석 / 미지정</p>
-                <p className="text-4xl font-black text-[#1C1C1E]">{stats.absent}<span className="text-sm text-ios-rose/70 ml-1">명</span></p>
-              </div>
-              <div className="bg-gray-50 border border-gray-100 p-5 rounded-[6px]">
-                <p className="text-[9px] uppercase font-black text-ios-gray mb-1 tracking-widest">전체 좌석</p>
-                <p className="text-2xl font-black text-[#1C1C1E]">{stats.total}<span className="text-[10px] text-ios-gray ml-1">SEATS</span></p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-ios-amber/10 border border-ios-amber/20 p-6 rounded-[6px] text-[#1C1C1E] ios-tap relative overflow-hidden">
-             <div className="relative z-10">
-               <Clock className="w-8 h-8 mb-4 text-ios-amber" />
-               <h4 className="font-black text-lg mb-1 tracking-tight">자동 동기화</h4>
-               <p className="text-[11px] font-medium leading-relaxed text-ios-gray">학생 및 학부모 화면에 즉시 반영됩니다.</p>
-             </div>
-             <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-ios-amber/5 rounded-full blur-xl" />
-          </div>
         </div>
       </div>
     </div>

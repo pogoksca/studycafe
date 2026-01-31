@@ -18,7 +18,26 @@ const CustomLogin = ({ onLoginSuccess }) => {
     const [rejectionReason, setRejectionReason] = useState('');
     const [applicantData, setApplicantData] = useState(null);
 
-    // Initial check when role changes or form mounts
+    const [schoolName, setSchoolName] = useState(() => {
+        return localStorage.getItem('schoolName') || 'GOE';
+    });
+
+    useEffect(() => {
+        const fetchSchoolInfo = async () => {
+            const { data } = await supabase
+                .from('configs')
+                .select('value')
+                .eq('key', 'school_info')
+                .single();
+            if (data && data.value.name) {
+                const name = data.value.name.split(' ')[0];
+                setSchoolName(name);
+                localStorage.setItem('schoolName', data.value.name);
+            }
+        };
+        fetchSchoolInfo();
+    }, []);
+
     const resetError = () => setError('');
     
     const autoHyphen = (value) => {
@@ -173,7 +192,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                         <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-6 border border-gray-100 shadow-sm overflow-hidden">
                             <Layout className="w-7 h-7 text-ios-indigo" />
                         </div>
-                        <h1 className="text-3xl font-black tracking-tighter italic leading-none">POGOK</h1>
+                        <h1 className="text-3xl font-black tracking-tighter italic leading-none">{schoolName}</h1>
                         <p className="text-[10px] font-black tracking-[0.3em] uppercase text-ios-indigo">Study Cafe System</p>
                     </div>
                     <div className="absolute -right-10 -top-10 w-40 h-40 bg-ios-indigo/5 rounded-full blur-3xl" />

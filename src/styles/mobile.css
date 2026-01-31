@@ -1,0 +1,361 @@
+/* Teacher Mobile Dashboard Specific Styles */
+
+/* Teacher Mobile Dashboard Specific Styles */
+
+.mobile-dashboard-container {
+  min-height: 100vh;
+  background-color: #f9fafb; /* bg-gray-50 */
+  display: flex;
+  flex-direction: column;
+  color: #1C1C1E;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Landing Menu Styles */
+.mobile-menu-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  gap: 2rem;
+}
+
+.mobile-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.mobile-menu-btn {
+  background-color: white;
+  aspect-ratio: 1 / 1;
+  border-radius: 2rem;
+  border: 1px solid #f3f4f6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.mobile-menu-btn:active {
+  transform: scale(0.95);
+  background-color: #f9fafb;
+}
+
+.mobile-menu-btn-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0.625rem;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-menu-btn-text {
+  font-size: 1rem;
+  font-weight: 900;
+  color: #1C1C1E;
+}
+
+.mobile-header {
+  background-color: white;
+  border-bottom: 1px solid #f3f4f6; /* border-gray-100 */
+  padding: 0.75rem 1rem 0.75rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.mobile-signature-pad {
+  border: 2px dashed #d1d5db; /* border-gray-300 */
+  border-radius: 0.75rem;
+  background-color: white;
+  touch-action: none;
+  overflow: hidden;
+  margin-left: auto;
+  margin-right: auto;
+  width: min(100%, 400px);
+  height: 200px;
+}
+
+.mobile-attendance-list {
+  flex: 1 1 0%;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+.mobile-seat-card {
+  background-color: white;
+  border-radius: 1rem;
+  padding: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #f3f4f6;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
+}
+
+.mobile-seat-card:active {
+  transform: scale(0.98);
+}
+
+.mobile-seat-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-seat-number {
+  font-size: 10px;
+  font-weight: 900;
+  color: #8E8E93;
+  text-transform: uppercase;
+  letter-spacing: -0.05em;
+}
+
+.mobile-student-name {
+  font-size: 1rem;
+  font-weight: 900;
+  color: #1C1C1E;
+}
+
+.mobile-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 900;
+  transition: all 0.2s;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.mobile-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.mobile-tap-feedback:active {
+  opacity: 0.7;
+  transform: scale(0.95);
+  transition: all 0.1s;
+}
+
+/* Grouped Grid Layout */
+.mobile-zone-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px; /* Increased horizontal gap between zones to 20px */
+  padding: 0 4px;
+}
+
+.zone-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px; /* Precise 10px gap for Title -> Divider -> First Seat */
+  min-width: 0;
+}
+
+.zone-seats-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px; /* Precise 20px gap between seats */
+}
+
+.zone-title-bar {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 6px;
+  border-radius: 6px;
+  color: white;
+  margin-bottom: 0; /* Remove margin to handle via divider */
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.zone-divider {
+  height: 2px;
+  background-color: #F2F2F7;
+  border-radius: 1px;
+  margin: 0; /* Spacing handled by column gap */
+}
+
+.mobile-grid-card {
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #E5E5EA;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  transition: transform 0.1s;
+}
+
+.mobile-grid-card:active {
+  transform: scale(0.97);
+}
+
+.grid-card-header {
+  padding: 4px;
+  text-align: center;
+  font-size: 11px; /* Slightly larger */
+  font-weight: 900;
+  color: white;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-dot {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.status-dot.green { background-color: #00FF00; box-shadow: 0 0 4px rgba(0, 255, 0, 0.5); }
+.status-dot.red { background-color: #FF3B30; box-shadow: 0 0 4px rgba(255, 59, 48, 0.5); }
+
+.grid-card-body {
+  padding: 8px 4px; /* Increased padding */
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px; /* Increased gap */
+  min-height: 52px; /* Slightly taller */
+  justify-content: center;
+}
+
+.grid-card-student {
+  font-size: 12px; /* Larger name */
+  font-weight: 900;
+  color: #1C1C1E;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-card-id {
+  font-size: 9px;
+  color: #8E8E93;
+  font-weight: 600;
+}
+
+.grid-card-info {
+  font-size: 8px;
+  color: #8E8E93;
+  font-weight: 600;
+}
+
+.grid-card-footer {
+  width: 100%;
+  display: flex;
+  border-top: 1px solid #E5E5EA;
+  background-color: #F8F8F8;
+  overflow: hidden;
+}
+
+.grid-status-btn {
+  flex: 1;
+  padding: 8px 0;
+  font-size: 10px;
+  font-weight: 900;
+  border: none;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+}
+
+.grid-action-btn {
+  flex: 1;
+  padding: 8px 0;
+  font-size: 10px;
+  font-weight: 900;
+  border: none;
+  border-left: 1px solid rgba(0, 0, 0, 0.05);
+  background-color: #FF9500;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.grid-action-btn:active {
+  background-color: #E68600;
+}
+
+.grid-action-btn.subtle {
+  background-color: #F2F2F7;
+  color: #1C1C1E;
+  border-left: 1px solid #E5E5EA;
+}
+
+.grid-action-btn.subtle:active {
+  background-color: #E5E5EA;
+}
+
+/* Status Specific Styles */
+.status-present-bg { background-color: #34C759; } /* iOS Emerald */
+.status-late-bg { background-color: #FF9500; }    /* iOS Amber */
+.status-early-bg { background-color: #FF3B30; }   /* iOS Rose */
+
+.status-present-btn { background-color: rgba(52, 199, 89, 0.1); color: #34C759; }
+.status-late-btn { background-color: rgba(255, 149, 0, 0.1); color: #FF9500; }
+.status-early-btn { background-color: rgba(255, 59, 48, 0.1); color: #FF3B30; }
+.status-absent-btn { background-color: #F2F2F7; color: #1C1C1E; }
+
+/* Solid backgrounds for "Checked" active status on the left */
+.status-present-active { color: white; }
+.status-late-active { background-color: #FF9500; color: white; }
+.status-early-active { background-color: #FF3B30; color: white; }
+
+/* 3-Tier Usage Tiers */
+.tier-active { opacity: 1; }
+.tier-reserved { opacity: 0.4; }
+.tier-empty { opacity: 0.15; }
+
+.mobile-seatmap-container {
+  width: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  background-color: #f2f2f7;
+  flex: 1;
+}
+
+.mobile-seatmap-content {
+  width: fit-content;
+  height: fit-content;
+  min-width: 100%;
+  background-color: white;
+  position: relative;
+}
+
+/* Scrollbar Hide Utility */
+.scrollbar-hide {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
+}

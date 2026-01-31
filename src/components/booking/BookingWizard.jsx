@@ -1,20 +1,57 @@
 import React, { useState, useEffect } from 'react';
-import { format, addDays, isBefore, startOfDay, parseISO, isWithinInterval } from 'date-fns';
+import { 
+  format, 
+  addDays, 
+  isBefore, 
+  startOfDay, 
+  parseISO, 
+  isWithinInterval,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  isSameDay,
+  isToday,
+  getDay,
+  addMonths,
+  subMonths,
+  startOfWeek,
+  endOfWeek
+} from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { Calendar as CalendarIcon, Clock, ChevronRight, Check, AlertCircle } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Monitor,
+  Clock,
+  Check,
+  AlertCircle,
+  MapPin,
+  Calendar as CalendarIcon,
+  User,
+  Trash2
+} from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
-const BookingWizard = ({ selectedSeat, onComplete }) => {
+const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, initialDate, onDateChange, currentZoneId }) => {
   const [step, setStep] = useState(1);
-  const [date, setDate] = useState(format(addDays(new Date(), 2), 'yyyy-MM-dd')); // Default to T+2
+  const [date, setDate] = useState(initialDate || format(addDays(new Date(), 2), 'yyyy-MM-dd'));
   const [firstAvailableDate, setFirstAvailableDate] = useState(format(addDays(new Date(), 2), 'yyyy-MM-dd'));
   const [sessions, setSessions] = useState([]);
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [authUser, setAuthUser] = useState(null); // The actual logged-in user
   const [opData, setOpData] = useState({ quarters: [], defaults: [], exceptions: [] });
   const [userDayBookings, setUserDayBookings] = useState([]);
+  const [seatDayBookings, setSeatDayBookings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Sync date when initialDate changes (e.g. from map)
+  useEffect(() => {
+    if (initialDate) {
+      setDate(initialDate);
+    }
+  }, [initialDate]);
 
   const sessionNameMap = {
     'Morning': '조회시간 이전',
@@ -27,78 +64,54 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
 
   useEffect(() => {
     const init = async () => {
-      setLoading(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
           const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-          setCurrentUser(profile);
+          setCurrentUser(targetUser || profile);
+          setAuthUser(profile);
       }
 
-      const [sData, qData, dData, eData] = await Promise.all([
-        supabase.from('sessions').select('*').order('id', { ascending: true }),
-        supabase.from('operation_quarters').select('*'),
-        supabase.from('operation_defaults').select('*'),
-        supabase.from('operation_exceptions').select('*')
-      ]);
+      // We need a zone_id for opData. If no seat, use the currentZoneId from props.
+      const effectiveZoneId = selectedSeat?.zone_id || currentZoneId;
 
-      if (sData.data) setSessions(sData.data);
-      const quarters = qData.data || [];
-      const defaults = dData.data || [];
-      const exceptions = eData.data || [];
+      if (effectiveZoneId) {
+        setLoading(true);
+        const [sData, qData, dData, eData] = await Promise.all([
+          supabase.from('sessions').select('*').eq('zone_id', effectiveZoneId).order('start_time', { ascending: true }),
+          supabase.from('operation_quarters').select('*'),
+          supabase.from('operation_defaults').select('*').eq('zone_id', effectiveZoneId),
+          supabase.from('operation_exceptions').select('*').eq('zone_id', effectiveZoneId)
+        ]);
 
-      setOpData({
-        quarters,
-        defaults,
-        exceptions
-      });
+        if (sData.data) setSessions(sData.data);
+        setOpData({
+          quarters: qData.data || [],
+          defaults: dData.data || [],
+          exceptions: eData.data || []
+        });
 
-      // Find first valid operating date starting from T+2
-      let checkDate = startOfDay(addDays(new Date(), 2));
-      let found = false;
-      let iterations = 0;
-      const maxSearchDays = 90; // Search up to 3 months ahead
-
-      while (!found && iterations < maxSearchDays) {
-          const dStr = format(checkDate, 'yyyy-MM-dd');
-          
-          // Check if testDate is in any quarter
-          const isInQuarter = quarters.some(q => 
-              q.start_date && q.end_date && 
-              isWithinInterval(checkDate, { 
-                  start: parseISO(q.start_date), 
-                  end: parseISO(q.end_date) 
-              })
-          );
-
-          // Check if testDate is an exception (holiday)
-          const isHoliday = exceptions.some(e => e.exception_date === dStr);
-
-          // Check if testDate has operating periods
-          const dayOfWeek = checkDate.getDay();
-          const dayDefault = defaults.find(def => def.day_of_week === dayOfWeek);
-          const hasPeriods = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
-
-          if (isInQuarter && !isHoliday && hasPeriods) {
-              setDate(dStr);
-              setFirstAvailableDate(dStr);
-              found = true;
-          } else {
-              checkDate = addDays(checkDate, 1);
-              iterations++;
-          }
+        setLoading(false);
+      } else {
+        // Fetch global quarters if no zone is known yet
+        const { data: qData } = await supabase.from('operation_quarters').select('*');
+        setOpData(prev => ({ ...prev, quarters: qData || [] }));
       }
-
-      setLoading(false);
     };
     init();
-  }, []);
+  }, [selectedSeat, currentZoneId, targetUser]); // Added targetUser to trigger re-init if needed
+
+  // NEW: Reactively sync currentUser when targetUser or authUser changes
+  useEffect(() => {
+    setCurrentUser(targetUser || authUser);
+  }, [targetUser, authUser]);
 
   useEffect(() => {
-    if (currentUser && date) {
+    if (currentUser && date && selectedSeat) {
         fetchUserDayBookings();
+        fetchSeatDayBookings();
     }
     setSelectedSessions([]); // Reset selection when date changes
-  }, [currentUser, date]);
+  }, [currentUser, date, selectedSeat, currentZoneId]);
 
   const fetchUserDayBookings = async () => {
       const { data } = await supabase
@@ -109,51 +122,69 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
       setUserDayBookings(data || []);
   };
 
+  const fetchSeatDayBookings = async () => {
+      if (!selectedSeat) return;
+      const { data } = await supabase
+          .from('bookings')
+          .select('*, profiles(username, full_name)')
+          .eq('seat_id', selectedSeat.id)
+          .eq('date', date);
+      setSeatDayBookings(data || []);
+  };
+
   const isDateOperating = (d) => {
     const targetDate = parseISO(d);
-    
-    // 0. Check T-2 Policy (2 days in advance)
-    const minAllowed = startOfDay(addDays(new Date(), 2));
+    const effectiveUser = loggedInUser || authUser;
+    const isPrivileged = effectiveUser && ['admin', 'teacher'].includes(effectiveUser.role);
+    const minAllowed = startOfDay(addDays(new Date(), isPrivileged ? 0 : 2));
+
     if (isBefore(targetDate, minAllowed)) {
-        return { ok: false, msg: `예약은 오늘 기준 2일 전까지만 가능합니다. (가능 날짜: ${format(minAllowed, 'M월 d일')}~)` };
+         return { ok: false, msg: `예약은 오늘 기준 ${isPrivileged ? '0' : '2'}일 전까지만 가능합니다.` };
     }
 
-    // 1. Check Quarters
-    const isInQuarter = opData.quarters.some(q => 
-        q.start_date && q.end_date && 
-        isWithinInterval(targetDate, { 
-            start: parseISO(q.start_date), 
-            end: parseISO(q.end_date) 
-        })
-    );
-    if (!isInQuarter) return { ok: false, msg: '선택한 날짜는 청람재 운영일이 아닙니다.' };
+    if (opData.quarters.length > 0) {
+      const isInQuarter = opData.quarters.some(q =>
+          q.start_date && q.end_date &&
+          isWithinInterval(targetDate, {
+              start: parseISO(q.start_date),
+              end: parseISO(q.end_date)
+          })
+      );
+      if (!isInQuarter) return { ok: false, msg: '선택한 날짜는 운영 기간이 아닙니다.' };
+    }
 
-    // 2. Check Exceptions
     const exception = opData.exceptions.find(e => e.exception_date === d);
     if (exception) return { ok: false, msg: `휴무일: ${exception.reason}` };
 
-    // 3. Check Defaults (At least one period active)
-    const dayOfWeek = targetDate.getDay();
-    const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
-    const hasAnyPeriod = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
-    if (!hasAnyPeriod) return { ok: false, msg: '해당 요일은 운영하지 않습니다.' };
+    if (opData.defaults.length > 0) {
+      const dayOfWeek = targetDate.getDay();
+      const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
+      const hasAnyPeriod = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
+      if (!hasAnyPeriod) return { ok: false, msg: '해당 요일은 운영하지 않습니다.' };
+    }
 
     return { ok: true };
   };
 
   const handleNext = () => {
     if (step === 1) {
+        // Enforce proxy booking for Staff
+        const effectiveUser = loggedInUser || authUser;
+        if (effectiveUser && ['admin', 'teacher'].includes(effectiveUser.role) && !targetUser) {
+            setError('관리자/교사는 본인 명의로 예약할 수 없습니다. 상단에서 학생을 먼저 검색해 주세요.');
+            return;
+        }
+
         const check = isDateOperating(date);
         if (!check.ok) {
             setError(check.msg);
             return;
         }
-        
-        // Seat Consistency Check: if already booked today, must be the same seat
-        if (userDayBookings.length > 0) {
+
+        if (userDayBookings.length > 0 && selectedSeat) {
             const existingSeatId = userDayBookings[0].seat_id;
             if (existingSeatId !== selectedSeat.id) {
-                setError(`오늘 이미 ${userDayBookings[0].seat_number}번 좌석을 예약하셨습니다. 같은 날에는 자리를 바꿀 수 없습니다.`);
+                setError(`오늘 이미 ${userDayBookings[0].seat_number}번 좌석을 예약하셨습니다.`);
                 return;
             }
         }
@@ -173,26 +204,171 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
     });
   };
 
-  const handleBooking = async () => {
-    if (selectedSessions.length === 0) return;
-    setLoading(true);
-    
-    const bookingsToInsert = selectedSessions.map(session => ({
-        user_id: currentUser.id,
-        seat_id: selectedSeat.id,
-        session_id: session.id,
-        date: date
-    }));
-
-    const { error: bookingError } = await supabase.from('bookings').insert(bookingsToInsert);
-
-    if (bookingError) {
-        alert('예약 처리 중 오류가 발생했습니다.');
-    } else {
-        alert(`예약이 완료되었습니다.\n${date}\n교시: ${selectedSessions.map(s => s.name).join(', ')}\n좌석: ${selectedSeat.display_number || selectedSeat.seat_number}번`);
-        onComplete();
+    async function handleCancelBooking(e, session_id) {
+        e.stopPropagation();
+        if (!window.confirm('해당 예약을 정말로 취소하시겠습니까?')) return;
+        try {
+            setLoading(true);
+            const { error: deleteError } = await supabase
+                .from('bookings')
+                .delete()
+                .eq('seat_id', selectedSeat.id)
+                .eq('date', date)
+                .eq('session_id', session_id);
+            if (deleteError) throw deleteError;
+            setSeatDayBookings(prev => prev.filter(b => b.session_id !== session_id));
+            setUserDayBookings(prev => prev.filter(b => b.session_id !== session_id));
+            alert('예약이 취소되었습니다.');
+        } catch (err) {
+            console.error('Cancel Error:', err);
+            setError(`예약 취소 중 오류 발생: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
     }
-    setLoading(false);
+
+  async function handleBooking() {
+    if (selectedSessions.length === 0 || loading) return;
+
+    // Final safety check for Staff
+    const effectiveAuthUser = loggedInUser || authUser;
+    if (effectiveAuthUser && ['admin', 'teacher'].includes(effectiveAuthUser.role) && !targetUser) {
+        setError('관리자/교사는 본인 명의로 예약할 수 없습니다.');
+        setStep(1);
+        return;
+    }
+
+    // Helper for KST Timestamp
+    const getKSTISOString = () => {
+        const now = new Date();
+        const kstOffset = 9 * 60 * 60 * 1000;
+        const kstTime = new Date(now.getTime() + kstOffset);
+        return kstTime.toISOString().replace('Z', '+09:00');
+    };
+
+    setLoading(true);
+    try {
+        const { data: currentBookings } = await supabase
+            .from('bookings')
+            .select('session_id, user_id, seat_id')
+            .eq('date', date)
+            .in('session_id', selectedSessions.map(s => s.id));
+
+        if (currentBookings && currentBookings.length > 0) {
+            const seatConflict = currentBookings.some(b => b.seat_id === selectedSeat.id);
+            const userConflict = currentBookings.some(b => b.user_id === currentUser.id);
+            if (seatConflict || userConflict) {
+                setError(seatConflict ? '이미 다른 예약이 발생했습니다.' : '해당 학생은 이미 다른 예약을 보유 중입니다.');
+                setStep(2);
+                setLoading(false);
+                fetchUserDayBookings();
+                fetchSeatDayBookings();
+                return;
+            }
+        }
+        const bookingsToInsert = selectedSessions.map(session => ({
+            user_id: currentUser.id,
+            seat_id: selectedSeat.id,
+            session_id: session.id,
+            date: date,
+            created_at: getKSTISOString()
+        }));
+        const { error: bookingError } = await supabase.from('bookings').insert(bookingsToInsert);
+        if (bookingError) {
+            setError(`오류 발생: ${bookingError.message}`);
+            setStep(2);
+        } else {
+            alert('예약이 완료되었습니다.');
+            onComplete();
+            window.location.reload();
+        }
+    } catch (err) {
+        setError('예상치 못한 오류 발생');
+    } finally {
+        setLoading(false);
+    }
+  }
+
+  const [viewMonth, setViewMonth] = useState(new Date());
+
+  const renderCalendar = () => {
+    const monthStart = startOfMonth(viewMonth);
+    const monthEnd = endOfMonth(monthStart);
+    const startDate = startOfWeek(monthStart);
+    const endDate = endOfWeek(monthEnd);
+    const calendarDays = eachDayOfInterval({ start: startDate, end: endDate });
+
+    return (
+      <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+        <div className="flex items-center justify-between mb-4 px-1">
+          <h4 className="text-sm font-black text-[#1C1C1E]">
+            {format(viewMonth, 'yyyy년 M월', { locale: ko })}
+          </h4>
+          <div className="flex gap-2">
+            <button 
+                onClick={() => setViewMonth(subMonths(viewMonth, 1))}
+                className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4 text-ios-gray" />
+            </button>
+            <button 
+                onClick={() => setViewMonth(addMonths(viewMonth, 1))}
+                className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <ChevronRight className="w-4 h-4 text-ios-gray" />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">
+          {['일', '월', '화', '수', '목', '금', '토'].map(day => (
+            <div key={day} className="text-center text-[10px] font-bold text-ios-gray/50 py-1">
+              {day}
+            </div>
+          ))}
+          {calendarDays.map((d, i) => {
+            const dStr = format(d, 'yyyy-MM-dd');
+            const opCheck = isDateOperating(dStr);
+            const isSelected = date === dStr;
+            const isCurrentMonth = isSameDay(startOfMonth(d), monthStart);
+            const isTodayDate = isToday(d);
+
+            return (
+              <button
+                key={i}
+                disabled={!opCheck.ok}
+                onClick={() => {
+                  setDate(dStr);
+                  if (onDateChange) onDateChange(dStr);
+                }}
+                className={`
+                  h-9 w-full rounded-lg flex flex-col items-center justify-center transition-all relative
+                  ${isSelected ? 'bg-[#1C1C1E] text-white shadow-md z-10' : ''}
+                  ${!isSelected && isCurrentMonth && opCheck.ok ? 'hover:bg-gray-100 text-[#1C1C1E] font-black' : ''}
+                  ${!isSelected && opCheck.ok && !isCurrentMonth ? 'text-ios-gray/40 font-black' : ''}
+                  ${!opCheck.ok ? 'opacity-20 cursor-not-allowed text-ios-gray grayscale' : ''}
+                  ${!isSelected && isTodayDate ? 'border border-ios-indigo text-ios-indigo font-black' : ''}
+                `}
+              >
+                <span className="text-xs">{format(d, 'd')}</span>
+              </button>
+            );
+          })}
+        </div>
+        
+        {/* Legend */}
+        <div className="mt-4 pt-4 border-t border-gray-50 flex items-center gap-4 px-1">
+            <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-[#1C1C1E]/10" />
+                <span className="text-[10px] font-bold text-ios-gray/70">운영일</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full bg-ios-indigo/20" />
+                <span className="text-[10px] font-bold text-ios-indigo/70">오늘</span>
+            </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -202,11 +378,13 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
       {/* Selected Seat Info - Relocated to Top */}
       <div className="bg-gray-50/50 rounded-[6px] mt-[10px] pt-4 px-4 pb-4 flex items-center gap-4 border border-gray-100">
         <div className="w-12 h-12 rounded-[6px] bg-white text-[#000000] flex items-center justify-center font-black text-sm border border-gray-200 shadow-sm">
-          {selectedSeat.display_number || selectedSeat.seat_number}
+          {selectedSeat ? (selectedSeat.display_number || selectedSeat.seat_number) : '?'}
         </div>
         <div>
           <p className="text-[9px] font-black text-[#000000] uppercase tracking-[0.2em] mb-0.5 opacity-50">현재 선택된 좌석</p>
-          <p className="text-base font-black text-[#1C1C1E]">Zone {selectedSeat.zone_name}</p>
+          <p className="text-base font-black text-[#1C1C1E]">
+            {selectedSeat ? `Zone ${selectedSeat.zone_name}` : '좌석을 선택해 주세요'}
+          </p>
         </div>
       </div>
 
@@ -228,22 +406,20 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
             <h3 className="text-xl font-black tracking-tight text-[#1C1C1E]">희망 날짜 선택</h3>
           </div>
           
-          <div className="space-y-3">
-            <input 
-              type="date" 
-              value={date}
-              min={format(addDays(new Date(), 2), 'yyyy-MM-dd')}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 rounded-[6px] p-4 text-lg focus:ring-1 focus:ring-ios-indigo transition-all font-black text-[#1C1C1E]"
-            />
-            <div className="bg-amber-50 p-5 rounded-[6px] border border-amber-100">
-              <p className="font-black text-ios-amber text-[9px] mb-1 uppercase tracking-widest flex items-center gap-1.5">
-                <Check className="w-2.5 h-2.5" /> T-2 정책 안내
-              </p>
-              <p className="text-amber-900/70 text-xs leading-relaxed font-medium">
-                안정적인 학습 환경을 위해 예약은 2일 전까지만 가능합니다.<br/>
-                <span className="text-amber-900 font-bold">오늘 예약 가능 날짜: {format(parseISO(firstAvailableDate), 'M월 d일')} 이후</span>
-              </p>
+          <div className="space-y-4">
+            {renderCalendar()}
+
+            {!isDateOperating(date).ok && (
+               <div className="p-4 bg-ios-rose/5 border border-ios-rose/10 rounded-xl flex items-center gap-2 animate-shake">
+                   <AlertCircle className="w-4 h-4 text-ios-rose" />
+                   <p className="text-[11px] font-black text-ios-rose italic">{isDateOperating(date).msg}</p>
+               </div>
+            )}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">선택된 날짜</p>
+                <p className="text-lg font-black text-[#1C1C1E]">
+                    {format(parseISO(date), 'yyyy년 M월 d일 (EEEE)', { locale: ko })}
+                </p>
             </div>
           </div>
           
@@ -254,15 +430,24 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
               </div>
           )}
 
-          <div className="flex gap-2">
+          {/* Bottom Controls */}
+          <div className="mt-8 pt-6 border-t border-gray-50 flex gap-3">
             <button 
-              onClick={() => onComplete()} 
-              className="flex-1 bg-gray-100 text-[#1C1C1E] py-4 rounded-[6px] font-black text-xs transition-all hover:bg-gray-200 ios-tap"
+              onClick={onComplete}
+              className="flex-1 py-3.5 rounded-xl text-sm font-black text-ios-gray bg-gray-50 hover:bg-gray-100 transition-all ios-tap"
             >
               취소
             </button>
-            <button onClick={handleNext} className="flex-[3] bg-[#1C1C1E] text-white py-4 rounded-[6px] font-black text-xs transition-all shadow-md ios-tap">
-              다음 단계로 계속
+            <button 
+              disabled={!isDateOperating(date).ok || !selectedSeat}
+              onClick={handleNext} 
+              className={`flex-[1.5] py-3.5 rounded-xl text-sm font-black text-white transition-all shadow-lg ios-tap ${
+                isDateOperating(date).ok && selectedSeat
+                  ? 'bg-[#1C1C1E] shadow-black/10 hover:bg-gray-800' 
+                  : 'bg-gray-200 cursor-not-allowed shadow-none'
+              }`}
+            >
+              다음 단계로
             </button>
           </div>
         </div>
@@ -290,6 +475,7 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
                     s.id === 4 ? dayDefault?.period2 : false;
                 
                 const isAlreadyBooked = userDayBookings.some(b => b.session_id === s.id);
+                const isSeatTaken = seatDayBookings.some(b => b.session_id === s.id);
                 const isSelected = selectedSessions.some(sel => sel.id === s.id);
 
                 if (!isOp) return null;
@@ -297,18 +483,30 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
                 return (
                     <button
                         key={s.id}
-                        disabled={isAlreadyBooked}
+                        disabled={isAlreadyBooked || isSeatTaken}
                         onClick={() => toggleSession(s)}
                         className={`p-4 rounded-[6px] border transition-all duration-300 flex items-center justify-between group ios-tap text-left ${
                         isSelected 
                             ? 'border-[#1C1C1E] bg-[#1C1C1E]/5 shadow-sm' 
-                            : isAlreadyBooked ? 'opacity-40 bg-gray-100 cursor-not-allowed' : 'border-gray-200 bg-gray-50 hover:bg-gray-100'
+                            : (isAlreadyBooked || isSeatTaken) 
+                                ? (['admin', 'teacher'].includes(currentUser?.role) ? 'border-red-100 bg-red-50/30' : 'opacity-30 bg-gray-100 cursor-not-allowed')
+                                : 'border-gray-100 bg-gray-50/50 hover:bg-gray-100/80'
                         }`}
                     >
                         <div className="flex-1 flex flex-col items-start">
                         <div className="flex items-center gap-2">
                             <p className="font-black text-base text-[#1C1C1E]">{getSessionName(s.name)}</p>
                             {isAlreadyBooked && <span className="text-[9px] font-black text-ios-gray bg-gray-200 px-1.5 py-0.5 rounded-full uppercase">이미 예약됨</span>}
+                            {!isAlreadyBooked && isSeatTaken && (
+                                <div className="flex flex-col items-start gap-1">
+                                    <span className="text-[9px] font-black text-ios-rose bg-ios-rose/10 px-1.5 py-0.5 rounded-full uppercase">좌석 점유됨</span>
+                                    {['admin', 'teacher'].includes(authUser?.role) && seatDayBookings.find(b => b.session_id === s.id)?.profiles && (
+                                        <span className="text-[9px] font-bold text-ios-rose/70">
+                                            {seatDayBookings.find(b => b.session_id === s.id).profiles.username} {seatDayBookings.find(b => b.session_id === s.id).profiles.full_name}
+                                        </span>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <p className="text-[10px] font-black text-ios-gray/70 uppercase tracking-tight mt-0.5">
                             {s.start_time.slice(0,5)} ~ {s.end_time.slice(0,5)}
@@ -318,6 +516,14 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
                         <div className="w-5 h-5 rounded-full bg-[#1C1C1E] flex items-center justify-center shadow-sm">
                             <Check className="w-3 h-3 text-white stroke-[3px]" />
                         </div>
+                        ) : (isAlreadyBooked || isSeatTaken) && ['admin', 'teacher'].includes(currentUser.role) ? (
+                        <button
+                            onClick={(e) => handleCancelBooking(e, s.id)}
+                            className="w-8 h-8 rounded-full bg-red-50 hover:bg-red-100 flex items-center justify-center transition-all group/btn border border-red-200"
+                            title="예약 취소"
+                        >
+                            <Trash2 className="w-4 h-4 text-red-500 group-hover/btn:scale-110 transition-transform" />
+                        </button>
                         ) : (
                         <div className="w-5 h-5 rounded-full border-2 border-gray-300 bg-white" />
                         )}
@@ -336,7 +542,7 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
           <div className="flex gap-2">
             <button 
                 onClick={() => onComplete()} 
-                className="px-6 bg-gray-100 text-[#1C1C1E] py-4 rounded-[6px] font-black text-xs transition-all hover:bg-gray-200 ios-tap"
+                className="flex-1 bg-gray-100 text-[#1C1C1E] py-4 rounded-[6px] font-black text-xs transition-all hover:bg-gray-200 ios-tap"
             >
                 취소
             </button>
@@ -349,9 +555,10 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
             <button 
                 disabled={selectedSessions.length === 0}
                 onClick={handleNext} 
-                className="flex-[2] bg-[#1C1C1E] text-white py-4 rounded-[6px] font-black text-xs transition-all shadow-md disabled:opacity-20 ios-tap"
+                className="flex-[2] bg-[#1C1C1E] text-white py-4 rounded-[6px] font-black text-xs transition-all shadow-md disabled:opacity-20 ios-tap flex flex-col items-center justify-center leading-tight"
             >
-                {selectedSessions.length}개 선택함 — 다음으로
+                <span>{selectedSessions.length}개 선택함</span>
+                <span className="opacity-60 text-[10px] mt-0.5">다음으로</span>
             </button>
           </div>
         </div>
@@ -373,8 +580,8 @@ const BookingWizard = ({ selectedSeat, onComplete }) => {
             {[
               { label: '예약 날짜', value: format(parseISO(date), 'yyyy년 M월 d일 (EEEE)', { locale: ko }), color: 'text-[#1C1C1E]' },
               { label: '선택 교시', value: selectedSessions.map(s => getSessionName(s.name)).join(', '), color: 'text-[#1C1C1E]' },
-              { label: '좌석 번호', value: `${selectedSeat.seat_number}번`, color: 'text-[#1C1C1E]' },
               { label: '배정 구역', value: selectedSeat.zone_name, color: 'text-[#1C1C1E]' },
+              { label: '좌석 번호', value: `${selectedSeat.seat_number}번`, color: 'text-[#1C1C1E]' },
             ].map((row, idx) => (
               <div key={idx} className="flex justify-between items-center p-4 rounded-[6px] bg-gray-50 border border-gray-100">
                 <span className="text-[9px] font-black text-ios-gray uppercase tracking-widest leading-none">{row.label}</span>

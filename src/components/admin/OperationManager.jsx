@@ -33,6 +33,8 @@ import { ko } from 'date-fns/locale';
 
 const OperationManager = () => {
     const [currentMonth, setCurrentMonth] = useState(new Date());
+    const [zones, setZones] = useState([]);
+    const [selectedZoneId, setSelectedZoneId] = useState(null);
     const [quarters, setQuarters] = useState([]);
     const [defaults, setDefaults] = useState([]);
     const [exceptions, setExceptions] = useState([]);
@@ -40,7 +42,6 @@ const OperationManager = () => {
     const [savingQuarters, setSavingQuarters] = useState(false);
     const [savingDefaults, setSavingDefaults] = useState(false);
 
-    // New Exception Form State
     const [newException, setNewException] = useState({
         date: format(new Date(), 'yyyy-MM-dd'),
         reason: '',
@@ -48,21 +49,41 @@ const OperationManager = () => {
     });
 
     const [academicYear, setAcademicYear] = useState(new Date().getFullYear());
-    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear()); // For dropdown
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
     useEffect(() => {
-        fetchData(academicYear);
-    }, [academicYear]);
+        fetchInitialData();
+    }, []);
 
-    const fetchData = async (year) => {
+    const fetchInitialData = async () => {
+        const { data } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+        if (data && data.length > 0) {
+            setZones(data);
+            setSelectedZoneId(data[0].id);
+        }
+    };
+
+    useEffect(() => {
+        if (selectedZoneId) {
+            fetchData(academicYear, selectedZoneId);
+        }
+    }, [academicYear, selectedZoneId]);
+
+    const fetchData = async (year, zoneId) => {
         setLoading(true);
         const [qData, dData, eData] = await Promise.all([
             supabase.from('operation_quarters')
                 .select('*')
                 .eq('academic_year', year)
                 .order('quarter', { ascending: true }),
-            supabase.from('operation_defaults').select('*').order('day_of_week', { ascending: true }),
-            supabase.from('operation_exceptions').select('*').order('exception_date', { ascending: true })
+            supabase.from('operation_defaults')
+                .select('*')
+                .eq('zone_id', zoneId)
+                .order('day_of_week', { ascending: true }),
+            supabase.from('operation_exceptions')
+                .select('*')
+                .eq('zone_id', zoneId)
+                .order('exception_date', { ascending: true })
         ]);
 
         const existingQuarters = qData.data || [];
@@ -74,11 +95,11 @@ const OperationManager = () => {
         const extraQuarters = existingQuarters.filter(q => q.quarter > 4);
         setQuarters([...merged, ...extraQuarters].sort((a, b) => a.quarter - b.quarter));
 
-        // Initialize defaults if empty
         if (dData.data && dData.data.length > 0) {
             setDefaults(dData.data);
         } else {
             setDefaults([0, 1, 2, 3, 4, 5, 6].map(d => ({
+                zone_id: zoneId,
                 day_of_week: d,
                 morning: false,
                 dinner: false,
@@ -130,6 +151,59 @@ const OperationManager = () => {
         setSavingQuarters(false);
     };
 
+    const handleDeleteQuarter = async (qNum) => {
+        const quarter = quarters.find(q => q.quarter === qNum);
+        if (!quarter) return;
+
+        // Check for existing bookings if dates were set
+        if (quarter.start_date && quarter.end_date) {
+            const { count, error: countError } = await supabase
+                .from('bookings')
+                .select('*', { count: 'exact', head: true })
+                .gte('date', quarter.start_date)
+                .lte('date', quarter.end_date);
+            
+            if (countError) {
+                console.error('Error checking bookings:', countError);
+            } else if (count > 0) {
+                if (!window.confirm(`해당 기간(${quarter.start_date} ~ ${quarter.end_date})에 이미 ${count}건의 예약이 존재합니다. 그래도 분기 설정을 삭제하시겠습니까?\n(예약 데이터 자체는 삭제되지 않으나, 학생들의 신규 예약이 불가능해집니다.)`)) {
+                    return;
+                }
+            } else {
+                if (!window.confirm(`${qNum}분기 운영 기간을 삭제하시겠습니까?`)) return;
+            }
+        } else {
+            if (!window.confirm(`${qNum}분기 항목을 삭제하시겠습니까?`)) return;
+        }
+
+        try {
+            // Delete from database
+            const { error } = await supabase
+                .from('operation_quarters')
+                .delete()
+                .eq('academic_year', academicYear)
+                .eq('quarter', qNum);
+
+            if (error) throw error;
+
+            // Update local state
+            if (qNum <= 4) {
+                // For standard quarters, just clear the dates
+                setQuarters(prev => prev.map(q => 
+                    q.quarter === qNum ? { ...q, start_date: null, end_date: null, quarter_name: null } : q
+                ));
+            } else {
+                // For extra quarters, remove from state
+                setQuarters(prev => prev.filter(q => q.quarter !== qNum));
+            }
+            
+            alert(`${qNum}분기 운영 기간이 삭제되었습니다.`);
+        } catch (err) {
+            console.error('Error deleting quarter:', err);
+            alert('삭제 중 오류가 발생했습니다.');
+        }
+    };
+
     const handleAddQuarter = () => {
         const maxQuarter = quarters.length > 0 ? Math.max(...quarters.map(q => q.quarter)) : 0;
         setQuarters([...quarters, { quarter: maxQuarter + 1, start_date: null, end_date: null, academic_year: academicYear }]);
@@ -160,17 +234,20 @@ const OperationManager = () => {
 
     const handleAddException = async (e) => {
         e.preventDefault();
+        if (!selectedZoneId) return;
+        
         const { error } = await supabase
             .from('operation_exceptions')
             .insert([{ 
                 exception_date: newException.date, 
                 reason: newException.reason, 
-                is_closed: true 
+                is_closed: true,
+                zone_id: selectedZoneId
             }]);
 
         if (!error) {
             setNewException({ ...newException, reason: '' });
-            fetchData(academicYear);
+            fetchData(academicYear, selectedZoneId);
         }
     };
 
@@ -182,11 +259,28 @@ const OperationManager = () => {
     // Calendar Rendering
     const renderHeader = () => (
         <div className="flex items-center justify-between mb-6 px-2">
-            <div>
-                <h3 className="text-xl font-black text-[#1C1C1E] tracking-tight">
-                    {format(currentMonth, 'yyyy년 MMMM', { locale: ko })}
-                </h3>
-                <p className="text-[10px] font-black text-ios-indigo uppercase tracking-widest mt-1">Operating Calendar</p>
+            <div className="flex items-center gap-6">
+                <div>
+                    <h3 className="text-xl font-black text-[#1C1C1E] tracking-tight">
+                        {format(currentMonth, 'yyyy년 MMMM', { locale: ko })}
+                    </h3>
+                    <p className="text-[10px] font-black text-ios-indigo uppercase tracking-widest mt-1">Operating Calendar</p>
+                </div>
+
+                {/* Zone Selection */}
+                <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+                    {zones.map(z => (
+                        <button
+                            key={z.id}
+                            onClick={() => setSelectedZoneId(z.id)}
+                            className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ios-tap ${
+                                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E]'
+                            }`}
+                        >
+                            {z.name}
+                        </button>
+                    ))}
+                </div>
             </div>
             <div className="flex gap-2">
                 <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
@@ -322,7 +416,7 @@ const OperationManager = () => {
                             <button 
                                 onClick={saveQuarters}
                                 disabled={savingQuarters}
-                                className="bg-[#1C1C1E] text-white px-5 py-2.5 rounded-[8px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-[#5856D6] shadow-md transition-all active:scale-95"
+                                className="bg-[#1C1C1E] text-white px-5 py-2.5 rounded-[8px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-gray-800 shadow-md transition-all active:scale-95"
                             >
                                 <Save className="w-3.5 h-3.5" /> 저장하기
                             </button>
@@ -344,7 +438,7 @@ const OperationManager = () => {
                             </select>
                             <button 
                                 onClick={handleYearChange}
-                                className="bg-[#1C1C1E] text-white px-3 py-2 rounded-[6px] text-[10px] font-black uppercase whitespace-nowrap hover:bg-[#5856D6] transition-colors"
+                                className="bg-[#1C1C1E] text-white px-3 py-2 rounded-[6px] text-[10px] font-black uppercase whitespace-nowrap hover:bg-gray-800 transition-colors"
                             >
                                 전환
                             </button>
@@ -355,7 +449,18 @@ const OperationManager = () => {
                         {quarters.map(q => (
                             <div key={q.quarter} className="space-y-2">
                                 <div className="flex justify-between items-center">
-                                    <p className="text-[11px] font-black text-ios-indigo">{q.quarter}분기</p>
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-[11px] font-black text-ios-indigo">{q.quarter}분기</p>
+                                        {(q.start_date || q.end_date || q.quarter > 4) && (
+                                            <button 
+                                                onClick={() => handleDeleteQuarter(q.quarter)}
+                                                className="p-1 text-ios-gray hover:text-ios-rose transition-colors"
+                                                title="기간 삭제"
+                                            >
+                                                <Trash2 className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </div>
                                     <span className="text-[8px] font-bold text-ios-gray bg-gray-50 px-2 py-0.5 rounded-full uppercase tracking-widest">Year {academicYear} - Q{q.quarter}</span>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2">
@@ -393,7 +498,7 @@ const OperationManager = () => {
                         <button 
                             onClick={saveDefaults}
                             disabled={savingDefaults}
-                            className="bg-[#1C1C1E] text-white px-5 py-2.5 rounded-[8px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-[#34C759] shadow-md transition-all active:scale-95"
+                            className="bg-[#1C1C1E] text-white px-5 py-2.5 rounded-[8px] text-[11px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-gray-800 shadow-md transition-all active:scale-95"
                         >
                             <Save className="w-3.5 h-3.5" /> 저장하기
                         </button>
@@ -461,7 +566,7 @@ const OperationManager = () => {
                         <button 
                             type="submit"
                             disabled={!newException.reason}
-                            className="w-full py-3 bg-[#1C1C1E] text-white rounded-[6px] font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-ios-indigo transition-all disabled:opacity-30 disabled:hover:bg-[#1C1C1E]"
+                            className="w-full py-3 bg-[#1C1C1E] text-white rounded-[6px] font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-gray-800 transition-all disabled:opacity-30 disabled:hover:bg-[#1C1C1E]"
                         >
                             <Plus className="w-3 h-3" /> 등록하기
                         </button>

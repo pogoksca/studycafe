@@ -123,7 +123,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
                     </button>
                     <button 
                         onClick={handleSave}
-                        className="flex-[2] py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-ios-indigo shadow-lg transition-all flex items-center justify-center gap-2"
+                        className="flex-[2] py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-gray-800 shadow-lg transition-all flex items-center justify-center gap-2"
                     >
                         <Check className="w-4 h-4" /> 서명 완료
                     </button>
@@ -135,30 +135,64 @@ const SignaturePad = ({ onSave, onCancel }) => {
 
 const SafetySupervision = () => {
     const [currentMonth, setCurrentMonth] = useState(new Date());
-    const [assignments, setAssignments] = useState([]); 
+    const [assignments, setAssignments] = useState([]);
+    const [zones, setZones] = useState([]);
+    const [selectedZoneId, setSelectedZoneId] = useState(null);
+    const [loading, setLoading] = useState(false);
+    
+    const [currentUser, setCurrentUser] = useState(null);
     const [quarters, setQuarters] = useState([]);
     const [defaults, setDefaults] = useState([]);
     const [exceptions, setExceptions] = useState([]);
-    const [currentUser, setCurrentUser] = useState(null);
-    const [loading, setLoading] = useState(false);
     
-    // UI State
-    const [addModal, setAddModal] = useState(null); 
-    const [editModal, setEditModal] = useState(null); 
-    const [signModal, setSignModal] = useState(null); 
+    // Derived academic year from currentMonth (Korean school standard: ends in February)
+    const monthVal = currentMonth.getMonth() + 1;
+    const academicYear = monthVal < 3 ? currentMonth.getFullYear() - 1 : currentMonth.getFullYear();
+
+    const [addModal, setAddModal] = useState(null);
+    const [editModal, setEditModal] = useState(null);
+    const [signModal, setSignModal] = useState(null);
     const [printModal, setPrintModal] = useState(false);
-    const [printData, setPrintData] = useState(null); 
+    const [printData, setPrintData] = useState(null);
     const [manualName, setManualName] = useState('');
     const [showWeekends, setShowWeekends] = useState(false);
 
     useEffect(() => {
         fetchUser();
-        fetchOperationData();
+        fetchZones();
     }, []);
 
     useEffect(() => {
-        fetchAssignments();
-    }, [currentMonth]);
+        if (selectedZoneId) {
+            fetchInitialData();
+        }
+    }, [academicYear, selectedZoneId]);
+
+    useEffect(() => {
+        if (selectedZoneId) {
+            fetchAssignments();
+        }
+    }, [currentMonth, selectedZoneId]);
+
+    const fetchZones = async () => {
+        const { data: zoneData } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+        if (zoneData && zoneData.length > 0) {
+            setZones(zoneData);
+            setSelectedZoneId(zoneData[0].id);
+        }
+    };
+
+    const fetchInitialData = async () => {
+        const [q, d, e] = await Promise.all([
+            supabase.from('operation_quarters').select('*').eq('academic_year', academicYear).order('quarter', { ascending: true }),
+            supabase.from('operation_defaults').select('*'),
+            supabase.from('operation_exceptions').select('*')
+        ]);
+        if (q.data) setQuarters(q.data);
+        if (d.data) setDefaults(d.data);
+        if (e.data) setExceptions(e.data);
+    };
+
 
     const fetchUser = async () => {
         const { data: { user } } = await supabase.auth.getUser();
@@ -168,18 +202,8 @@ const SafetySupervision = () => {
         }
     };
 
-    const fetchOperationData = async () => {
-        const [q, d, e] = await Promise.all([
-            supabase.from('operation_quarters').select('*'),
-            supabase.from('operation_defaults').select('*'),
-            supabase.from('operation_exceptions').select('*')
-        ]);
-        if (q.data) setQuarters(q.data);
-        if (d.data) setDefaults(d.data);
-        if (e.data) setExceptions(e.data);
-    };
-
     const fetchAssignments = async () => {
+        if (!selectedZoneId) return;
         setLoading(true);
         const start = startOfMonth(currentMonth).toISOString();
         const end = endOfMonth(currentMonth).toISOString();
@@ -187,6 +211,7 @@ const SafetySupervision = () => {
         const { data, error } = await supabase
             .from('supervision_assignments')
             .select('*')
+            .eq('zone_id', selectedZoneId)
             .gte('date', start)
             .lte('date', end)
             .order('created_at', { ascending: true });
@@ -196,7 +221,7 @@ const SafetySupervision = () => {
     };
 
     const handleAddSupervisor = async () => {
-        if (!manualName.trim() || !addModal) return;
+        if (!manualName.trim() || !addModal || !selectedZoneId) return;
         
         const dateStr = format(addModal.date, 'yyyy-MM-dd');
         
@@ -205,7 +230,8 @@ const SafetySupervision = () => {
             .insert([{
                 date: dateStr,
                 supervisor_name: manualName.trim(),
-                teacher_id: null 
+                teacher_id: null,
+                zone_id: selectedZoneId
             }]);
 
         if (error) {
@@ -301,10 +327,12 @@ const SafetySupervision = () => {
     };
 
     const handlePrintConfirm = async (quarter) => {
+        if (!selectedZoneId) return;
         setLoading(true);
         const { data, error } = await supabase
             .from('supervision_assignments')
             .select('*')
+            .eq('zone_id', selectedZoneId)
             .gte('date', quarter.start_date)
             .lte('date', quarter.end_date)
             .order('date', { ascending: true });
@@ -315,7 +343,7 @@ const SafetySupervision = () => {
             return;
         }
 
-        setPrintData({ quarter, assignments: data || [] });
+        setPrintData({ quarter, assignments: data || [], defaults, exceptions });
         setPrintModal(false);
         setLoading(false);
 
@@ -326,17 +354,34 @@ const SafetySupervision = () => {
 
     const renderHeader = () => (
         <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-                <h3 className="text-2xl font-black text-[#1C1C1E] tracking-tight">
-                    {format(currentMonth, 'yyyy년 M월')}
-                </h3>
+            <div className="flex items-center gap-6">
+                <div className="flex items-center gap-4">
+                    <h3 className="text-2xl font-black text-[#1C1C1E] tracking-tight">
+                        {format(currentMonth, 'yyyy년 M월')}
+                    </h3>
+                    <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+                        <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-1.5 hover:bg-white rounded-lg text-ios-gray hover:text-[#1C1C1E] transition-all ios-tap shadow-sm hover:shadow">
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-1.5 hover:bg-white rounded-lg text-ios-gray hover:text-[#1C1C1E] transition-all ios-tap shadow-sm hover:shadow">
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Zone Selection */}
                 <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
-                    <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-1.5 hover:bg-white rounded-lg text-ios-gray hover:text-[#1C1C1E] transition-all ios-tap shadow-sm hover:shadow">
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-1.5 hover:bg-white rounded-lg text-ios-gray hover:text-[#1C1C1E] transition-all ios-tap shadow-sm hover:shadow">
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
+                    {zones.map(z => (
+                        <button
+                            key={z.id}
+                            onClick={() => setSelectedZoneId(z.id)}
+                            className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ios-tap ${
+                                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E]'
+                            }`}
+                        >
+                            {z.name}
+                        </button>
+                    ))}
                 </div>
             </div>
             
@@ -355,7 +400,7 @@ const SafetySupervision = () => {
                 </label>
                 <button 
                     onClick={handlePrintClick}
-                    className="flex items-center gap-2 bg-[#1C1C1E] text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-lg hover:bg-ios-indigo hover:shadow-xl ios-tap"
+                    className="flex items-center gap-2 bg-[#1C1C1E] text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-lg hover:bg-gray-800 hover:shadow-xl ios-tap"
                 >
                     <Printer className="w-3.5 h-3.5" /> 대장 출력
                 </button>
@@ -429,7 +474,7 @@ const SafetySupervision = () => {
                                 {(isAdmin && isOperatingDay && dayAssignments.length < maxSlots) && (
                                     <button 
                                         onClick={() => setAddModal({ date })}
-                                        className="w-5 h-5 flex items-center justify-center rounded-full bg-[#1C1C1E] text-white hover:bg-ios-indigo transition-all ios-tap shadow-sm"
+                                        className="w-5 h-5 flex items-center justify-center rounded-full bg-[#1C1C1E] text-white hover:bg-gray-800 transition-all ios-tap shadow-sm"
                                         title="감독관 추가"
                                     >
                                         <Plus className="w-3 h-3" />
@@ -543,7 +588,7 @@ const SafetySupervision = () => {
                             </div>
                             <button 
                                 onClick={handleAddSupervisor}
-                                className="w-full py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-ios-indigo shadow-lg transition-all"
+                                className="w-full py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-gray-800 shadow-lg transition-all"
                             >
                                 추가하기
                             </button>
@@ -578,7 +623,7 @@ const SafetySupervision = () => {
                             </div>
                             <button 
                                 onClick={handleUpdateSupervisor}
-                                className="w-full py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-ios-indigo shadow-lg transition-all"
+                                className="w-full py-3 bg-[#1C1C1E] text-white rounded-xl text-xs font-bold hover:bg-gray-800 shadow-lg transition-all"
                             >
                                 수정 완료
                             </button>
@@ -759,6 +804,14 @@ const SafetySupervision = () => {
                                                             const sup1 = dayAssignments[0];
                                                             const sup2 = dayAssignments[1];
 
+                                                            const dayDefault = printData.defaults.find(d => d.day_of_week === date.getDay());
+                                                            const exception = printData.exceptions.find(e => e.exception_date === dateStr);
+                                                            const isWithinRange = isWithinInterval(date, { 
+                                                                start: parseISO(printData.quarter.start_date), 
+                                                                end: parseISO(printData.quarter.end_date) 
+                                                            });
+                                                            const isOperatingDay = isWithinRange && !exception && (dayDefault?.morning || dayDefault?.dinner || dayDefault?.period1 || dayDefault?.period2);
+
                                                             return (
                                                                 <tr key={dIndex} className="h-[7mm] text-[7pt] text-black">
                                                                     <td className={`border border-black text-center font-bold tracking-tighter align-middle p-0 ${
@@ -768,16 +821,16 @@ const SafetySupervision = () => {
                                                                         {format(date, 'd')}({dayStr})
                                                                     </td>
                                                                     <td className="border border-black text-center break-all align-middle p-0.5">
-                                                                        {sup1?.supervisor_name}
+                                                                        {isOperatingDay ? (sup1?.supervisor_name || '') : '-'}
                                                                     </td>
                                                                     <td className="border border-black text-center align-middle p-0.5">
-                                                                        {sup1?.signature_url && <img src={sup1.signature_url} className="max-h-[18px] w-auto mx-auto object-contain" alt="서명" />}
+                                                                        {isOperatingDay && sup1?.signature_url && <img src={sup1.signature_url} className="max-h-[18px] w-auto mx-auto object-contain" alt="서명" />}
                                                                     </td>
                                                                     <td className="border border-black text-center break-all align-middle p-0.5">
-                                                                        {sup2?.supervisor_name}
+                                                                        {isOperatingDay ? (sup2?.supervisor_name || '') : ''}
                                                                     </td>
                                                                     <td className="border border-black text-center align-middle p-0.5">
-                                                                        {sup2?.signature_url && <img src={sup2.signature_url} className="max-h-[18px] w-auto mx-auto object-contain" alt="서명" />}
+                                                                        {isOperatingDay && sup2?.signature_url && <img src={sup2.signature_url} className="max-h-[18px] w-auto mx-auto object-contain" alt="서명" />}
                                                                     </td>
                                                                 </tr>
                                                             );
