@@ -144,6 +144,7 @@ const SafetySupervision = () => {
     const [quarters, setQuarters] = useState([]);
     const [operatingRules, setOperatingRules] = useState([]);
     const [exceptions, setExceptions] = useState([]);
+    const [schoolInfo, setSchoolInfo] = useState({ name: '', level: '' });
     
     // Derived academic year from currentMonth (Korean school standard: ends in February)
     const monthVal = currentMonth.getMonth() + 1;
@@ -160,6 +161,7 @@ const SafetySupervision = () => {
     useEffect(() => {
         fetchUser();
         fetchZones();
+        fetchSchoolInfo();
     }, []);
 
     useEffect(() => {
@@ -173,6 +175,13 @@ const SafetySupervision = () => {
             fetchAssignments();
         }
     }, [currentMonth, selectedZoneId]);
+
+    const fetchSchoolInfo = async () => {
+        const { data } = await supabase.from('configs').select('value').eq('key', 'school_info').single();
+        if (data?.value) {
+            setSchoolInfo(data.value);
+        }
+    };
 
     const fetchZones = async () => {
         const { data: zoneData } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
@@ -858,7 +867,7 @@ const SafetySupervision = () => {
                         </div>
                         
                         <div className="mt-2 text-center text-[9pt] font-bold flex-none text-black">
-                             위와 같이 안전관리 지도 감독을 실시하였음을 확인합니다. &nbsp;&nbsp;&nbsp;&nbsp; 포곡고등학교장
+                             위와 같이 안전관리 지도 감독을 실시하였음을 확인합니다. &nbsp;&nbsp;&nbsp;&nbsp; {schoolInfo.name ? `${schoolInfo.name}${schoolInfo.level || ''}` : 'GOE학교'}장
                         </div>
                     </div>
                 </div>,

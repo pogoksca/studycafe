@@ -203,7 +203,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
     const fetchSchoolInfo = async () => {
         const { data } = await supabase.from('configs').select('value').eq('key', 'school_info').single();
-        if (data?.value?.name) setSchoolName(data.value.name);
+        if (data?.value?.name_en) setSchoolName(data.value.name_en);
     };
 
     fetchData();

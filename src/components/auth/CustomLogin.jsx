@@ -128,10 +128,9 @@ const CustomLogin = ({ onLoginSuccess }) => {
                 .select('value')
                 .eq('key', 'school_info')
                 .single();
-            if (data && data.value.name) {
-                const name = data.value.name.split(' ')[0];
-                setSchoolName(name);
-                localStorage.setItem('schoolName', data.value.name);
+            if (data?.value) {
+                setSchoolName(data.value.name_en || 'GOE');
+                localStorage.setItem('schoolInfo', JSON.stringify(data.value));
             }
         };
         fetchSchoolInfo();

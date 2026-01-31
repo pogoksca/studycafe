@@ -38,8 +38,8 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
             .eq('key', 'school_info')
             .single();
         
-        if (data?.value?.name) {
-            setSchoolName(data.value.name);
+        if (data?.value?.name_en) {
+            setSchoolName(data.value.name_en);
         }
     };
 

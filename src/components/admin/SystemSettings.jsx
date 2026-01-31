@@ -15,7 +15,8 @@ const SystemSettings = () => {
     
     // Global Settings
     const [schoolName, setSchoolName] = useState('GOE STUDY CAFE');
-    const [schoolAddress, setSchoolAddress] = useState('');
+    const [schoolNameEn, setSchoolNameEn] = useState('POGOK');
+    const [schoolLevel, setSchoolLevel] = useState('고등학교');
     
     // GPS & Safety States
     const [gpsSettings, setGpsSettings] = useState({ 
@@ -39,8 +40,9 @@ const SystemSettings = () => {
             // 1. Fetch School Config
             const { data: configData } = await supabase.from('configs').select('*').eq('key', 'school_info').single();
             if (configData) {
-                setSchoolName(configData.value.name || 'POGOK STUDY CAFE');
-                setSchoolAddress(configData.value.address || '');
+                setSchoolName(configData.value.name || 'POGOK');
+                setSchoolNameEn(configData.value.name_en || 'POGOK');
+                setSchoolLevel(configData.value.level || '고등학교');
             }
 
             // 2. Fetch School Config (Placeholder/Alternative)
@@ -79,7 +81,11 @@ const SystemSettings = () => {
             // 1. Save School Info
             await supabase.from('configs').upsert({
                 key: 'school_info',
-                value: { name: schoolName, address: schoolAddress }
+                value: { 
+                    name: schoolName, 
+                    name_en: schoolNameEn, 
+                    level: schoolLevel 
+                }
             });
 
             // 2. Save GPS Settings (Global)
@@ -139,25 +145,42 @@ const SystemSettings = () => {
                             <School className="w-5 h-5 text-ios-indigo" />
                             <h3 className="text-lg font-black text-[#1C1C1E]">학교 기본 정보</h3>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-min">
                             <div className="space-y-2">
-                                <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 이름</label>
+                                <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 한글명</label>
                                 <input 
                                     type="text" 
                                     value={schoolName}
                                     onChange={(e) => setSchoolName(e.target.value)}
-                                    className="w-full bg-gray-50 border border-transparent focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
+                                    className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
                                 />
                             </div>
                             <div className="space-y-2">
-                                <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 주소</label>
+                                <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 영문명 (브랜딩용)</label>
                                 <input 
                                     type="text" 
-                                    value={schoolAddress}
-                                    onChange={(e) => setSchoolAddress(e.target.value)}
-                                    className="w-full bg-gray-50 border border-transparent focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
-                                    placeholder="인증 서버 및 관리 대장용 주소"
+                                    value={schoolNameEn}
+                                    onChange={(e) => setSchoolNameEn(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
+                                    placeholder="APP 상단 타이틀 등에 사용됩니다."
                                 />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교급</label>
+                                <div className="relative">
+                                    <select 
+                                        value={schoolLevel}
+                                        onChange={(e) => setSchoolLevel(e.target.value)}
+                                        className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none appearance-none cursor-pointer"
+                                    >
+                                        <option value="고등학교">고등학교</option>
+                                        <option value="중학교">중학교</option>
+                                        <option value="학교">학교</option>
+                                    </select>
+                                    <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-ios-gray">
+                                        <Settings className="w-4 h-4 opacity-30" />
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </section>

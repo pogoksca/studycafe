@@ -47,8 +47,9 @@ function App() {
   })
   const [viewDate, setViewDate] = useState(format(new Date(), 'yyyy-MM-dd')); // Global date state for seat map
   const [selectedZoneId, setSelectedZoneId] = useState(null); // Global state for current zone
-  const [schoolName, setSchoolName] = useState(() => {
-    return localStorage.getItem('schoolName') || 'GOE STUDY CAFE';
+  const [schoolInfo, setSchoolInfo] = useState(() => {
+    const saved = localStorage.getItem('schoolInfo');
+    return saved ? JSON.parse(saved) : { name: 'POGOK', name_en: 'POGOK', level: '고등학교' };
   });
   
   // Proxy Search State (Global)
@@ -126,9 +127,9 @@ function App() {
         .select('value')
         .eq('key', 'school_info')
         .single();
-      if (data) {
-        setSchoolName(data.value.name);
-        localStorage.setItem('schoolName', data.value.name);
+      if (data?.value) {
+        setSchoolInfo(data.value);
+        localStorage.setItem('schoolInfo', JSON.stringify(data.value));
       }
     };
     fetchSchoolInfo();
@@ -233,8 +234,8 @@ function App() {
               <Layout className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-tighter leading-none text-[#1C1C1E]">{schoolName.split(' ')[0]}</h1>
-              <p className="text-[9px] font-black text-ios-indigo tracking-widest uppercase opacity-60 mt-1">{schoolName.split(' ').slice(1).join(' ') || 'Study Cafe'}</p>
+              <h1 className="text-lg font-black tracking-tighter leading-none text-[#1C1C1E]">{schoolInfo.name_en || 'GOE'}</h1>
+              <p className="text-[9px] font-black text-ios-indigo tracking-widest uppercase opacity-60 mt-1">Study Cafe</p>
             </div>
           </div>
 
