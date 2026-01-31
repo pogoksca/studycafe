@@ -11,10 +11,83 @@ const FloorPlanEditor = () => {
   const [displayNumber, setDisplayNumber] = useState('');
   const [zoneName, setZoneName] = useState('A');
   const [zoneColor, setZoneColor] = useState('#5E5CE6');
+  
+  // Style states for structures
+  const [bgColor, setBgColor] = useState('#E5E5EA');
+  const [strokeColor, setStrokeColor] = useState('#D1D1D6');
+  const [textColor, setTextColor] = useState('#8E8E93');
+  const [fontSize, setFontSize] = useState(12);
+  
   const [zones, setZones] = useState([]);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [creationMode, setCreationMode] = useState(null); // 'structure' or null
+  const [drawStart, setDrawStart] = useState(null);
+  const [tempRect, setTempRect] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [deletedIds, setDeletedIds] = useState([]);
+
+  const centerLayout = (targetCanvas) => {
+    const canvas = targetCanvas || fabricRef.current;
+    if (!canvas) return;
+
+    const objects = canvas.getObjects();
+    if (objects.length === 0) return;
+
+    // Calculate bounding box of all objects
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    objects.forEach(obj => {
+        const bound = obj.getBoundingRect(true);
+        minX = Math.min(minX, bound.left);
+        minY = Math.min(minY, bound.top);
+        maxX = Math.max(maxX, bound.left + bound.width);
+        maxY = Math.max(maxY, bound.top + bound.height);
+    });
+
+    const layoutWidth = maxX - minX;
+    const layoutHeight = maxY - minY;
+    
+    // Get current container size
+    const vptWidth = containerRef.current?.clientWidth || canvas.getWidth();
+    const vptHeight = containerRef.current?.clientHeight || canvas.getHeight();
+
+    // Calculate viewport offset to center the layout
+    // Center point of layout: (minX + layoutWidth/2)
+    // Center point of screen: (vptWidth / 2)
+    const offsetX = (vptWidth / 2) - (minX + layoutWidth / 2);
+    const offsetY = (vptHeight / 2) - (minY + layoutHeight / 2);
+
+    canvas.setViewportTransform([1, 0, 0, 1, offsetX, offsetY]);
+    canvas.requestRenderAll();
+  };
+
+  const saveToHistory = () => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    
+    // Use getObjects() but we need to deal with coordinates carefully
+    // Since we now have a global coordinate system, obj.left/top ARE the true coordinates.
+    const currentState = canvas.getObjects().map(obj => {
+        const data = obj.data || {};
+        return {
+            id: data.id,
+            seatNumber: data.seatNumber,
+            displayNumber: data.displayNumber,
+            zoneName: data.zoneName,
+            zoneColor: data.zoneColor,
+            pos_x: obj.left,
+            pos_y: obj.top,
+            width: obj.width,
+            height: obj.height,
+            label: data.label,
+            type: data.type,
+            rotation: obj.angle,
+            globalNumber: data.globalNumber
+        };
+    });
+    
+    setHistory(prev => [...prev.slice(-19), currentState]); // Keep last 20 states
+  };
   
   // Refs for event handlers
   const creationModeRef = useRef(null);
@@ -25,7 +98,9 @@ const FloorPlanEditor = () => {
   // Sync state to ref for event handlers
   useEffect(() => {
     creationModeRef.current = creationMode;
-  }, [creationMode]);
+    drawStartRef.current = drawStart;
+    tempRectRef.current = tempRect;
+  }, [creationMode, drawStart, tempRect]);
 
   useEffect(() => {
     fetchZones();
@@ -54,13 +129,24 @@ const FloorPlanEditor = () => {
     containerRef.current.appendChild(canvasEl);
 
     const canvas = new fabric.Canvas(canvasEl, {
-      width: 1000,
-      height: 600, // Small default, will be updated by loadSeats
+      width: containerRef.current.clientWidth,
+      height: containerRef.current.clientHeight,
       backgroundColor: 'transparent',
-      selection: true, // Enable rubber-band/multi selection
+      selection: true,
     });
 
     fabricRef.current = canvas;
+
+    // Resize Observer for Auto-Centering
+    const resizeObserver = new ResizeObserver(() => {
+        if (!containerRef.current || !fabricRef.current) return;
+        const width = containerRef.current.clientWidth;
+        const height = containerRef.current.clientHeight;
+        
+        fabricRef.current.setDimensions({ width, height });
+        centerLayout(fabricRef.current);
+    });
+    resizeObserver.observe(containerRef.current);
 
     const loadSeats = async () => {
       setLoading(true);
@@ -80,48 +166,24 @@ const FloorPlanEditor = () => {
         // Filter valid data
         const validSeats = data.filter(s => typeof s.pos_x === 'number' && typeof s.pos_y === 'number');
         
-        let offsetX = 0;
-        let offsetY = 0;
-        let totalWidth = 1000;
-        let totalHeight = 600;
-
-        if (validSeats.length > 0) {
-            // Horizontal centering
-            const minX = Math.min(...validSeats.map(s => s.pos_x));
-            const maxX = Math.max(...validSeats.map(s => s.pos_x + (s.width || 72)));
-            const layoutWidth = maxX - minX;
-            
-            const parentWidth = containerRef.current?.clientWidth || layoutWidth;
-            totalWidth = Math.max(layoutWidth + 100, parentWidth); // Add padding
-            offsetX = (totalWidth - layoutWidth) / 2 - minX; 
-            
-            const minY = Math.min(...validSeats.map(s => s.pos_y));
-            const maxY = Math.max(...validSeats.map(s => s.pos_y + (s.height || 72)));
-            const layoutHeight = maxY - minY;
-            offsetY = 20 - minY;
-            totalHeight = Math.max(layoutHeight + 100, 600);
-        }
-
-        fabricRef.current.setDimensions({ width: totalWidth, height: totalHeight });
-
         validSeats.forEach(s => {
-          renderSeat({
-            ...s,
-            pos_x: s.pos_x + offsetX,
-            pos_y: s.pos_y + offsetY
-          });
+          renderSeat(s);
           // Ensuring clean state on load
           const obj = fabricRef.current.getObjects().find(o => o.data.id === s.id);
           if (obj) {
              delete obj.data.isDirty;
           }
         });
+
+        // Initial Centering
+        setTimeout(() => {
+            if (isMounted) centerLayout(fabricRef.current);
+        }, 100);
+
         fabricRef.current.renderAll();
       } else {
-        // Clear canvas if no data for zone
         if (fabricRef.current) {
           fabricRef.current.clear();
-          fabricRef.current.setDimensions({ width: 1000, height: 600 });
         }
       }
       setLoading(false);
@@ -366,11 +428,6 @@ const FloorPlanEditor = () => {
       const delta = opt.e.deltaY;
       const vpt = canvas.viewportTransform;
       vpt[5] -= delta;
-      
-      const vptHeight = containerRef.current?.clientHeight || 0;
-      const canvasHeight = canvas.getHeight();
-      if (vptHeight > 0 && vpt[5] < -(canvasHeight - vptHeight)) vpt[5] = -(canvasHeight - vptHeight);
-
       canvas.requestRenderAll();
       opt.e.preventDefault();
       opt.e.stopPropagation();
@@ -510,44 +567,57 @@ const FloorPlanEditor = () => {
        }
      });
  
-     canvas.on('selection:created', (e) => {
-       const selected = e.selected;
-       if (selected.length === 1) {
-         const obj = selected[0];
-         setSelectedSeat(obj);
-         // Only set seat properties if it's a seat
-         if (obj.data?.type !== 'structure') {
-           setSeatNumber(obj.data?.seatNumber || '');
-           setDisplayNumber(obj.data?.displayNumber || '');
-           setZoneName(obj.data?.zoneName || 'A');
-           setZoneColor(obj.data?.zoneColor || '#5E5CE6');
-         }
-       } else {
-         setSelectedSeat(null); // Clear single properties when multiple selected
-       }
-     });
-     
-     canvas.on('selection:updated', (e) => {
-       const selected = e.selected;
-       if (selected.length === 1) {
-         const obj = selected[0];
-         setSelectedSeat(obj);
-         if (obj.data?.type !== 'structure') {
-           setSeatNumber(obj.data?.seatNumber || '');
-           setDisplayNumber(obj.data?.displayNumber || '');
-           setZoneName(obj.data?.zoneName || 'A');
-           setZoneColor(obj.data?.zoneColor || '#5E5CE6');
-         }
-       } else {
-         setSelectedSeat(null);
-       }
-     });
- 
-     canvas.on('selection:cleared', () => {
-       setSelectedSeat(null);
-       setSeatNumber('');
-       setDisplayNumber('');
-     });
+      canvas.on('selection:created', (e) => {
+        const selected = e.selected;
+        if (selected.length === 1) {
+          const obj = selected[0];
+          setSelectedSeat(obj);
+          if (obj.data?.type === 'structure') {
+            setBgColor(obj.data.bgColor || '#E5E5EA');
+            setStrokeColor(obj.data.strokeColor || '#D1D1D6');
+            setTextColor(obj.data.textColor || '#8E8E93');
+            setFontSize(obj.data.fontSize || 12);
+          } else {
+            setSeatNumber(obj.data?.seatNumber || '');
+            setDisplayNumber(obj.data?.displayNumber || '');
+            setZoneName(obj.data?.zoneName || 'A');
+            setZoneColor(obj.data?.zoneColor || '#5E5CE6');
+          }
+        } else {
+          setSelectedSeat(null);
+        }
+      });
+      
+      canvas.on('selection:updated', (e) => {
+        const selected = e.selected;
+        if (selected.length === 1) {
+          const obj = selected[0];
+          setSelectedSeat(obj);
+          if (obj.data?.type === 'structure') {
+            setBgColor(obj.data.bgColor || '#E5E5EA');
+            setStrokeColor(obj.data.strokeColor || '#D1D1D6');
+            setTextColor(obj.data.textColor || '#8E8E93');
+            setFontSize(obj.data.fontSize || 12);
+          } else {
+            setSeatNumber(obj.data?.seatNumber || '');
+            setDisplayNumber(obj.data?.displayNumber || '');
+            setZoneName(obj.data?.zoneName || 'A');
+            setZoneColor(obj.data?.zoneColor || '#5E5CE6');
+          }
+        } else {
+          setSelectedSeat(null);
+        }
+      });
+  
+      canvas.on('selection:cleared', () => {
+        setSelectedSeat(null);
+        setSeatNumber('');
+        setDisplayNumber('');
+        setBgColor('#E5E5EA');
+        setStrokeColor('#D1D1D6');
+        setTextColor('#8E8E93');
+        setFontSize(12);
+      });
  
      canvas.on('object:modified', async (e) => {
        const target = e.target;
@@ -629,19 +699,19 @@ const FloorPlanEditor = () => {
 
   const createStructure = (x, y, w, h, label) => {
     const rect = new fabric.Rect({
-      fill: '#E5E5EA',
+      fill: bgColor,
       width: w,
       height: h,
       rx: 6, ry: 6,
-      stroke: '#D1D1D6',
+      stroke: strokeColor,
       strokeWidth: 1,
     });
 
     const text = new fabric.IText(label, {
-      fontSize: 12,
+      fontSize: fontSize,
       originX: 'center', originY: 'center',
       left: w / 2, top: h / 2,
-      fill: '#8E8E93',
+      fill: textColor,
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
       selectable: false,
     });
@@ -651,14 +721,21 @@ const FloorPlanEditor = () => {
     const group = new fabric.Group([rect, text], {
       left: x,
       top: y,
+      originX: 'left',
+      originY: 'top',
+      perPixelTargetFind: true,
       data: { 
         id: newId, 
         type: 'structure',
         label: label,
         width: w, 
         height: h,
+        bgColor,
+        strokeColor,
+        textColor,
+        fontSize,
         isDirty: true,
-        seatNumber: `STR_${newId.slice(-8)}` // Initialize immediately
+        seatNumber: `STR_${newId.slice(-8)}`
       }
     });
 
@@ -668,21 +745,20 @@ const FloorPlanEditor = () => {
 
   const renderSeat = (seatData) => {
     if (seatData.type === 'structure') {
-      // Structure Rendering
       const rect = new fabric.Rect({
-        fill: '#E5E5EA',
+        fill: seatData.bg_color || '#E5E5EA',
         width: seatData.width || 72,
         height: seatData.height || 72,
         rx: 6, ry: 6,
-        stroke: '#D1D1D6',
+        stroke: seatData.stroke_color || '#D1D1D6',
         strokeWidth: 1,
       });
 
       const text = new fabric.IText(seatData.label || '구조물', {
-        fontSize: 12,
+        fontSize: seatData.font_size || 12,
         originX: 'center', originY: 'center',
         left: (seatData.width || 72) / 2, top: (seatData.height || 72) / 2,
-        fill: '#8E8E93',
+        fill: seatData.text_color || '#8E8E93',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
         selectable: false,
       });
@@ -691,13 +767,20 @@ const FloorPlanEditor = () => {
         id: seatData.id,
         left: seatData.pos_x,
         top: seatData.pos_y,
+        originX: 'left',
+        originY: 'top',
         angle: seatData.rotation,
+        perPixelTargetFind: true,
         data: { 
           id: seatData.id, 
           type: 'structure',
           label: seatData.label,
           width: seatData.width,
-          height: seatData.height
+          height: seatData.height,
+          bgColor: seatData.bg_color,
+          strokeColor: seatData.stroke_color,
+          textColor: seatData.text_color,
+          fontSize: seatData.font_size
         }
       });
       fabricRef.current.add(group);
@@ -725,7 +808,10 @@ const FloorPlanEditor = () => {
     const group = new fabric.Group([seat, text], {
       left: seatData.pos_x,
       top: seatData.pos_y,
+      originX: 'left',
+      originY: 'top',
       angle: seatData.rotation,
+      perPixelTargetFind: true,
       data: { 
         id: seatData.id, 
         type: 'seat',
@@ -741,21 +827,44 @@ const FloorPlanEditor = () => {
   };
 
   const updateSeatProperties = () => {
-    if (selectedSeat && selectedSeat.data?.type !== 'structure') {
+    if (selectedSeat) {
       saveToHistory();
-      selectedSeat.set('data', { 
-        ...selectedSeat.data, 
-        seatNumber, 
-        displayNumber, 
-        zoneName, 
-        zoneColor 
-      });
       
-      const textObj = selectedSeat.getObjects().find(obj => obj.type === 'i-text');
-      if (textObj) textObj.set('text', displayNumber);
-      
-      const rect = selectedSeat.getObjects().find(obj => obj.type === 'rect');
-      if (rect) rect.set('fill', zoneColor);
+      if (selectedSeat.data?.type === 'structure') {
+        selectedSeat.set('data', {
+          ...selectedSeat.data,
+          bgColor,
+          strokeColor,
+          textColor,
+          fontSize,
+          isDirty: true
+        });
+
+        const rect = selectedSeat.getObjects().find(obj => obj.type === 'rect');
+        if (rect) {
+          rect.set({ fill: bgColor, stroke: strokeColor });
+        }
+
+        const textObj = selectedSeat.getObjects().find(obj => obj.type === 'i-text');
+        if (textObj) {
+          textObj.set({ fill: textColor, fontSize: fontSize });
+        }
+      } else {
+        selectedSeat.set('data', { 
+          ...selectedSeat.data, 
+          seatNumber, 
+          displayNumber, 
+          zoneName, 
+          zoneColor,
+          isDirty: true
+        });
+        
+        const rect = selectedSeat.getObjects().find(obj => obj.type === 'rect');
+        if (rect) rect.set('fill', zoneColor);
+
+        const textObj = selectedSeat.getObjects().find(obj => obj.type === 'i-text');
+        if (textObj) textObj.set('text', displayNumber);
+      }
       
       fabricRef.current.renderAll();
     }
@@ -786,6 +895,9 @@ const FloorPlanEditor = () => {
 
     const group = new fabric.Group([seat, text], {
       left: 150, top: 150,
+      originX: 'left',
+      originY: 'top',
+      perPixelTargetFind: true,
       data: { 
         id: crypto.randomUUID(),
         type: 'seat',
@@ -976,6 +1088,10 @@ const FloorPlanEditor = () => {
           width: finalWidth, 
           height: finalHeight,
           label: obj.data?.label || null,
+          bg_color: obj.data?.bgColor || null,
+          stroke_color: obj.data?.strokeColor || null,
+          text_color: obj.data?.textColor || null,
+          font_size: obj.data?.fontSize || null,
           // Seat specific
           seat_number: sNum,
           display_number: obj.data?.displayNumber || null,
@@ -1080,182 +1196,276 @@ const FloorPlanEditor = () => {
   };
 
   return (
-    <div className="flex flex-col xl:flex-row gap-6 items-stretch w-full h-full mx-auto leading-normal overflow-hidden relative">
+    <div className="flex flex-col w-full h-full mx-auto leading-normal overflow-hidden relative bg-[#F2F2F7]">
       {loading && (
-        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-30 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm z-50 flex items-center justify-center pointer-events-none">
           <div className="w-8 h-8 border-3 border-ios-indigo border-t-transparent rounded-full animate-spin"></div>
         </div>
       )}
       
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Zone Selection Header */}
-        <div className="flex gap-[10px] m-[10px] mb-4 inline-flex self-start">
+      {/* Top Unified Toolbar */}
+      <div className="bg-white/80 backdrop-blur-md border-b border-black/5 p-4 flex items-center justify-between shadow-sm z-30">
+        <div className="flex items-center gap-4">
+          {/* Zone Selection Buttons */}
+          <div className="flex gap-1">
             {zones.map(z => (
-                <button
-                    key={z.id}
-                    onClick={() => setSelectedZoneId(z.id)}
-                    className={`px-6 py-2 rounded-lg text-xs font-black transition-all ios-tap border-none outline-none ring-0 ${
-                        selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
-                    }`}
-                >
-                    {z.name}
-                </button>
+              <button
+                key={z.id}
+                onClick={() => setSelectedZoneId(z.id)}
+                className={`px-5 py-2 rounded-apple-md text-[11px] font-black transition-all border ${
+                  selectedZoneId === z.id 
+                    ? 'bg-[#1C1C1E] text-white border-[#1C1C1E] shadow-sm' 
+                    : 'bg-white text-ios-gray border-gray-100 hover:text-[#1C1C1E] hover:border-gray-200'
+                }`}
+              >
+                {z.name}
+              </button>
             ))}
+          </div>
+
+          <div className="h-6 w-[1px] bg-gray-200 mx-2" />
+
+          {/* Action Tools */}
+          <div className="flex items-center gap-1.5">
+            <button 
+              onClick={addSeat} 
+              className="flex items-center gap-2 bg-ios-indigo text-white px-4 py-2 rounded-apple-md text-[11px] font-black hover:bg-ios-indigo/90 transition-all ios-tap shadow-sm shadow-ios-indigo/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              좌석 추가
+            </button>
+            <button 
+              onClick={() => setCreationMode(prev => prev === 'structure' ? null : 'structure')} 
+              className={`flex items-center gap-2 px-4 py-2 rounded-apple-md text-[11px] font-black transition-all border ios-tap ${
+                creationMode === 'structure' 
+                  ? 'bg-[#1C1C1E] text-white border-[#1C1C1E]' 
+                  : 'bg-white text-ios-gray border-gray-100 hover:bg-gray-50'
+              }`}
+            >
+              <LayoutTemplate className="w-3.5 h-3.5" />
+              공간요소 추가
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 w-full bg-white rounded-t-[6px] rounded-b-none border-0 overflow-hidden p-2.5 pb-0">
-          {/* 
-              Canvas Host: Isolated from React reconciliation.
-              Fabric.js will wrap the manually injected canvas here.
-          */}
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={autoReorder}
+            className="p-2.5 rounded-apple-md bg-white border border-gray-100 text-ios-amber hover:bg-ios-amber/5 transition-all ios-tap group"
+            title="번호 자동 정렬"
+          >
+            <Hash className="w-4 h-4 group-hover:scale-110 transition-transform" />
+          </button>
+          <button 
+            onClick={alignPositions}
+            className="p-2.5 rounded-apple-md bg-white border border-gray-100 text-ios-emerald hover:bg-ios-emerald/5 transition-all ios-tap group"
+            title="위치 정렬"
+          >
+            <Grid className="w-4 h-4 group-hover:scale-110 transition-transform" />
+          </button>
+          
+          <div className="h-6 w-[1px] bg-gray-200 mx-2" />
+          
+          <button 
+            onClick={saveLayout} 
+            disabled={loading}
+            className="flex items-center gap-2 bg-[#1C1C1E] text-white px-5 py-2.5 rounded-apple-md text-[12px] font-black hover:bg-black transition-all ios-tap disabled:opacity-50 shadow-lg shadow-black/5"
+          >
+            <Save className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            레이아웃 저장
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 w-full relative overflow-hidden bg-white">
+        {/* Creation Mode Indicator Overlay */}
+        {creationMode === 'structure' && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-[#1C1C1E]/80 backdrop-blur-lg px-6 py-2.5 rounded-full border border-white/10 shadow-xl pointer-events-none animate-spring-up">
+            <span className="text-white text-[11px] font-black tracking-tight">드래그하여 공간요소 영역을 지정하세요</span>
+          </div>
+        )}
+
+        {/* Canvas Host */}
+        <div className="w-full h-full flex flex-col">
           <div 
             ref={containerRef} 
             className="flex-1 h-full relative overflow-hidden cursor-grab active:cursor-grabbing touch-none select-none scrollbar-hide"
           />
         </div>
-      </div>
 
-      <div className="w-full xl:w-80 h-full overflow-y-auto scrollbar-hide space-y-6 animate-spring-up">
-        <div className="bg-white border border-gray-100 rounded-[6px] p-6 space-y-8 shadow-sm">
-          <div className="space-y-3">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-ios-gray">편집 도구</h3>
-            {creationMode === 'structure' && (
-              <div className="bg-ios-indigo/10 text-ios-indigo text-xs font-bold p-3 rounded-[6px] text-center animate-pulse mb-2">
-                빈 공간을 드래그하여 영역을 지정하세요
+        {/* Floating Inspector (Context Sensitive) */}
+        <div className={`absolute top-6 right-6 w-72 transition-all duration-500 ease-apple-out z-40 ${
+          selectedSeat ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 translate-y-4 pointer-events-none'
+        }`}>
+          <div className="glass-material rounded-apple-xl border border-white/40 shadow-2xl p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-ios-indigo">속성 설정</h3>
+              <div className="flex gap-1.5">
+                <button 
+                  onClick={rotateSelected} 
+                  className="p-2 rounded-apple-md bg-white/50 hover:bg-white text-ios-indigo transition-all shadow-sm border border-white/40"
+                  title="90도 회전"
+                >
+                  <RotateCw className="w-3.5 h-3.5" />
+                </button>
+                <button 
+                  onClick={deleteSelected} 
+                  className="p-2 rounded-apple-md bg-ios-rose/5 hover:bg-ios-rose text-ios-rose hover:text-white transition-all shadow-sm border border-ios-rose/10"
+                  title="삭제"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
-            )}
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={addSeat} className="flex flex-col items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 p-4 rounded-[6px] transition-all border border-gray-100 ios-tap group">
-                <div className="w-10 h-10 rounded-[6px] bg-ios-indigo/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Plus className="w-5 h-5 text-ios-indigo" />
-                </div>
-                <span className="font-black text-[10px] text-[#1C1C1E]">좌석 추가</span>
-              </button>
-              <button 
-                onClick={() => setCreationMode(prev => prev === 'structure' ? null : 'structure')} 
-                className={`flex flex-col items-center justify-center gap-2 p-4 rounded-[6px] transition-all border ios-tap group ${creationMode === 'structure' ? 'bg-gray-100 border-ios-indigo ring-1 ring-ios-indigo' : 'bg-gray-50 hover:bg-gray-100 border-gray-100'}`}
-              >
-                <div className={`w-10 h-10 rounded-[6px] flex items-center justify-center group-hover:scale-110 transition-transform bg-ios-indigo/10`}>
-                  <LayoutTemplate className="w-5 h-5 text-ios-indigo" />
-                </div>
-                <span className="font-black text-[10px] text-[#1C1C1E]">공간요소 추가</span>
-              </button>
             </div>
             
-            <div className="grid grid-cols-2 gap-3">
-              <button 
-                onClick={autoReorder}
-                className="w-full flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 p-4 rounded-[6px] transition-all border border-gray-100 ios-tap"
-              >
-                <Hash className="w-4 h-4 text-ios-amber" />
-                <span className="font-black text-[10px] text-[#1C1C1E]">번호 정렬</span>
-              </button>
-              <button 
-                onClick={alignPositions}
-                className="w-full flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 p-4 rounded-[6px] transition-all border border-gray-100 ios-tap"
-              >
-                <Grid className="w-4 h-4 text-ios-emerald" />
-                <span className="font-black text-[10px] text-[#1C1C1E]">위치 정렬</span>
-              </button>
-            </div>
-
-            <button 
-              onClick={saveLayout} 
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 p-4 rounded-[6px] transition-all border border-gray-100 ios-tap disabled:opacity-50 group mt-2"
-            >
-              <div className="w-10 h-10 rounded-[6px] bg-ios-indigo/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <Save className={`w-5 h-5 text-ios-indigo ${loading ? 'animate-spin' : ''}`} />
-              </div>
-              <span className="font-black text-[10px] text-[#1C1C1E]">전체 저장</span>
-            </button>
-          </div>
-
-          <div className={`space-y-6 transition-all duration-300 ${selectedSeat ? 'opacity-100 translate-y-0' : 'opacity-20 translate-y-2 pointer-events-none filter blur-[2px]'}`}>
-            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-ios-gray">속성 설정</h3>
-            
-            {selectedSeat?.data?.type !== 'structure' && (
-              <>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">Display No</label>
-                      <input 
-                        type="text"
-                        value={displayNumber}
-                        onChange={(e) => setDisplayNumber(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-[6px] p-3 text-sm font-black text-[#1C1C1E] focus:ring-1 focus:ring-ios-indigo transition-all"
-                        placeholder="예: A-01"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">Zone</label>
-                      <select 
-                        value={zoneName}
-                        onChange={(e) => setZoneName(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-[6px] p-3 text-sm font-black text-[#1C1C1E] focus:ring-1 focus:ring-ios-indigo appearance-none"
-                      >
-                        <option value="A">Zone A</option>
-                        <option value="B">Zone B</option>
-                        <option value="C">Zone C</option>
-                      </select>
-                    </div>
+            {selectedSeat?.data?.type !== 'structure' ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">Display No</label>
+                    <input 
+                      type="text"
+                      value={displayNumber}
+                      onChange={(e) => setDisplayNumber(e.target.value)}
+                      className="w-full bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-xs font-black text-[#1C1C1E] focus:ring-1 focus:ring-ios-indigo"
+                      placeholder="예: A-01"
+                    />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">Zone</label>
+                    <select 
+                      value={zoneName}
+                      onChange={(e) => setZoneName(e.target.value)}
+                      className="w-full bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-xs font-black text-[#1C1C1E] focus:ring-1 focus:ring-ios-indigo appearance-none"
+                    >
+                      <option value="A">Zone A</option>
+                      <option value="B">Zone B</option>
+                      <option value="C">Zone C</option>
+                    </select>
+                  </div>
+                </div>
 
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1 flex items-center gap-1.5">
+                    <Palette className="w-2.5 h-2.5" /> Zone Color
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="color" 
+                      value={zoneColor}
+                      onChange={(e) => setZoneColor(e.target.value)}
+                      className="w-10 h-10 bg-transparent border-0 rounded-[8px] cursor-pointer overflow-hidden p-0 shadow-sm"
+                    />
+                    <input 
+                      type="text" 
+                      value={zoneColor.toUpperCase()}
+                      onChange={(e) => setZoneColor(e.target.value)}
+                      className="flex-1 bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-[10px] font-black text-[#1C1C1E]"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button 
+                    onClick={updateSeatProperties}
+                    className="w-full bg-ios-indigo text-white py-3 rounded-apple-md font-black text-[11px] shadow-lg shadow-ios-indigo/20 ios-tap"
+                  >
+                    변경 적용
+                  </button>
+                  <button 
+                    onClick={() => setSelectedSeat(null)}
+                    className="w-full mt-2 text-ios-gray py-2 font-bold text-[10px] hover:text-[#1C1C1E] transition-colors"
+                  >
+                    속성창 닫기
+                  </button>
+                </div>
+              </div>
+            ) : (
+                <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1 flex items-center gap-1.5">
-                      <Palette className="w-2.5 h-2.5" /> Zone Color
+                      배경색
                     </label>
                     <div className="flex gap-2">
                       <input 
                         type="color" 
-                        value={zoneColor}
-                        onChange={(e) => setZoneColor(e.target.value)}
-                        className="w-12 h-12 bg-transparent border-0 rounded-[6px] cursor-pointer overflow-hidden p-0 shadow-sm"
+                        value={bgColor}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        className="w-10 h-10 bg-transparent border-0 rounded-[8px] cursor-pointer"
                       />
                       <input 
                         type="text" 
-                        value={zoneColor.toUpperCase()}
-                        onChange={(e) => setZoneColor(e.target.value)}
-                        className="flex-1 bg-white border border-gray-200 rounded-[6px] p-3 text-sm font-black text-[#1C1C1E] focus:ring-1 focus:ring-ios-indigo"
+                        value={bgColor.toUpperCase()}
+                        onChange={(e) => setBgColor(e.target.value)}
+                        className="flex-1 bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-[10px] font-black"
                       />
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <button 
-                      onClick={() => setSelectedSeat(null)}
-                      className="w-full bg-gray-100 text-gray-500 py-4 rounded-[6px] font-black text-xs hover:bg-gray-200 ios-tap"
-                    >
-                      취소/닫기
-                    </button>
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">테두리색</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="color" 
+                        value={strokeColor}
+                        onChange={(e) => setStrokeColor(e.target.value)}
+                        className="w-10 h-10 bg-transparent border-0 rounded-[8px] cursor-pointer"
+                      />
+                      <input 
+                        type="text" 
+                        value={strokeColor.toUpperCase()}
+                        onChange={(e) => setStrokeColor(e.target.value)}
+                        className="flex-1 bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-[10px] font-black"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">글자색</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="color" 
+                        value={textColor}
+                        onChange={(e) => setTextColor(e.target.value)}
+                        className="w-10 h-10 bg-transparent border-0 rounded-[8px] cursor-pointer"
+                      />
+                      <input 
+                        type="text" 
+                        value={textColor.toUpperCase()}
+                        onChange={(e) => setTextColor(e.target.value)}
+                        className="flex-1 bg-white/80 border border-white/60 rounded-[8px] p-2.5 text-[10px] font-black"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-ios-gray uppercase tracking-widest px-1">글자 크기 ({fontSize}px)</label>
+                    <input 
+                      type="range"
+                      min="6"
+                      max="48"
+                      value={fontSize}
+                      onChange={(e) => setFontSize(parseInt(e.target.value))}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <div className="pt-2">
                     <button 
                       onClick={updateSeatProperties}
-                      className="w-full bg-[#1C1C1E] text-white py-4 rounded-[6px] font-black text-xs shadow-sm shadow-black/10 ios-tap"
+                      className="w-full bg-ios-indigo text-white py-3 rounded-apple-md font-black text-[11px] shadow-lg"
                     >
-                      변경 적용
+                      스타일 적용
+                    </button>
+                    <button 
+                      onClick={() => setSelectedSeat(null)}
+                      className="w-full mt-2 text-ios-gray py-2 font-bold text-[10px]"
+                    >
+                      닫기
                     </button>
                   </div>
                 </div>
-              </>
             )}
-
-            {selectedSeat?.data?.type === 'structure' && (
-              <div className="py-4 text-center">
-                 <p className="text-xs text-ios-gray">구조물은 크기/회전/위치만 수정 가능합니다.</p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-3 pb-2">
-              <button onClick={rotateSelected} className="flex items-center justify-center gap-2 bg-gray-50 hover:bg-gray-100 p-4 rounded-[6px] transition-all border border-gray-100 ios-tap">
-                <RotateCw className="w-4 h-4 text-ios-blue" />
-                <span className="font-black text-[10px] text-[#1C1C1E]">회전</span>
-              </button>
-              <button onClick={deleteSelected} className="flex items-center justify-center gap-2 bg-ios-rose/5 hover:bg-ios-rose/10 text-ios-rose p-4 rounded-[6px] transition-all border border-ios-rose/10 ios-tap">
-                <Trash2 className="w-4 h-4" />
-                <span className="font-black text-[10px]">삭제</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>

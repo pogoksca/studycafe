@@ -1,6 +1,102 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Layout, User, Lock, Phone, AlertCircle, CheckCircle2, ArrowRight, Loader2, ShieldCheck, ClipboardCheck, GraduationCap, Users as UsersIcon, Briefcase } from 'lucide-react';
+import { Layout, User, Lock, Phone, AlertCircle, CheckCircle2, ArrowRight, Loader2, ShieldCheck, ClipboardCheck, GraduationCap, Users as UsersIcon, Briefcase, Eraser, PenTool } from 'lucide-react';
+
+const InlineSignaturePad = forwardRef(({ penColor = '#1C1C1E' }, ref) => {
+    const canvasRef = useRef(null);
+    const [isDrawing, setIsDrawing] = useState(false);
+    const [mousePos, setMousePos] = useState(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+    }, [penColor]);
+
+    useImperativeHandle(ref, () => ({
+        clear: () => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        },
+        getCanvas: () => canvasRef.current,
+        isEmpty: () => {
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext('2d');
+            const pixelBuffer = new Uint32Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+            return !pixelBuffer.some(color => color !== 0);
+        }
+    }));
+
+    const getPos = (e) => {
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        const clientX = (e.touches ? e.touches[0].clientX : e.clientX);
+        const clientY = (e.touches ? e.touches[0].clientY : e.clientY);
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    };
+
+    const start = (e) => {
+        setIsDrawing(true);
+        const { x, y } = getPos(e);
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    };
+
+    const draw = (e) => {
+        const pos = getPos(e);
+        if (!e.touches) setMousePos(pos);
+        
+        if (!isDrawing) return;
+        const ctx = canvasRef.current.getContext('2d');
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+    };
+
+    return (
+        <div 
+            className="w-full h-full relative cursor-none group"
+            onMouseEnter={() => !isDrawing && setMousePos(null)}
+            onMouseLeave={() => setMousePos(null)}
+        >
+            <canvas
+                ref={canvasRef}
+                onMouseDown={start}
+                onMouseMove={draw}
+                onMouseUp={() => setIsDrawing(false)}
+                onTouchStart={start}
+                onTouchMove={draw}
+                onTouchEnd={() => setIsDrawing(false)}
+                className="w-full h-full touch-none"
+            />
+            {mousePos && (
+                <div 
+                    className="absolute pointer-events-none rounded-full border border-white/50 shadow-sm"
+                    style={{
+                        left: mousePos.x,
+                        top: mousePos.y,
+                        width: '10px',
+                        height: '10px',
+                        backgroundColor: penColor,
+                        transform: 'translate(-50%, -50%)'
+                    }}
+                />
+            )}
+        </div>
+    );
+});
 
 const CustomLogin = ({ onLoginSuccess }) => {
     const [role, setRole] = useState('student'); // student, parent, teacher
@@ -17,6 +113,9 @@ const CustomLogin = ({ onLoginSuccess }) => {
     const [error, setError] = useState('');
     const [rejectionReason, setRejectionReason] = useState('');
     const [applicantData, setApplicantData] = useState(null);
+
+    const studentSigPad = React.useRef(null);
+    const parentSigPad = React.useRef(null);
 
     const [schoolName, setSchoolName] = useState(() => {
         return localStorage.getItem('schoolName') || 'GOE';
@@ -150,24 +249,65 @@ const CustomLogin = ({ onLoginSuccess }) => {
             return;
         }
 
-        setLoading(true);
-        const { error: updateError } = await supabase
-            .from('applicant_pool')
-            .update({ 
-                phone_number: formData.phone,
-                pledge_accepted: true,
-                privacy_accepted: true,
-                pledged_at: new Date().toISOString(),
-                status: 'pending'
-            })
-            .eq('id', applicantData.id);
-
-        if (updateError) {
-            setError('신청 처리 중 오류가 발생했습니다.');
-        } else {
-            setStep('pending');
+        if (studentSigPad.current?.isEmpty() || parentSigPad.current?.isEmpty()) {
+            setError('학생과 학부모 서명을 모두 완료해 주세요.');
+            return;
         }
-        setLoading(false);
+
+        setLoading(true);
+        setError('');
+
+        try {
+            // Helper to upload signature to storage
+            const uploadSignature = async (sigInstance, bucket) => {
+                const canvas = sigInstance.getCanvas();
+                return new Promise((resolve, reject) => {
+                    canvas.toBlob(async (blob) => {
+                        if (!blob) {
+                            reject(new Error('서명을 이미지로 변환할 수 없습니다.'));
+                            return;
+                        }
+                        const fileName = `${applicantData.student_id}_${Date.now()}.png`;
+                        const { data, error: uploadError } = await supabase.storage
+                            .from(bucket)
+                            .upload(fileName, blob, { contentType: 'image/png', upsert: true });
+
+                        if (uploadError) {
+                            reject(uploadError);
+                        } else {
+                            const { data: { publicUrl } } = supabase.storage
+                                .from(bucket)
+                                .getPublicUrl(fileName);
+                            resolve(publicUrl);
+                        }
+                    }, 'image/png');
+                });
+            };
+
+            // Upload both signatures
+            const studentSignatureUrl = await uploadSignature(studentSigPad.current, 'student-signatures');
+            const parentSignatureUrl = await uploadSignature(parentSigPad.current, 'parent-signatures');
+
+            const { error: updateError } = await supabase
+                .from('applicant_pool')
+                .update({ 
+                    phone_number: formData.phone,
+                    pledge_accepted: true,
+                    privacy_accepted: true,
+                    student_signature: studentSignatureUrl,
+                    parent_signature: parentSignatureUrl,
+                    pledged_at: new Date().toISOString(),
+                    status: 'pending'
+                })
+                .eq('id', applicantData.id);
+
+            if (updateError) throw updateError;
+            setStep('pending');
+        } catch (err) {
+            setError('신청 처리 중 오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'));
+        } finally {
+            setLoading(false);
+        }
     };
 
     // 4. Phone Challenge Verification
@@ -235,7 +375,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         placeholder={role === 'teacher' ? "아이디 (ID)" : "이름 (ID)"}
                                         value={formData.name}
                                         onChange={(e) => setFormData({...formData, name: e.target.value})}
-                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none"
+                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                     />
                                 </div>
                                 <div className="relative group">
@@ -247,7 +387,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         maxLength={role === 'teacher' ? undefined : 5}
                                         value={role === 'teacher' ? formData.password : formData.studentId}
                                         onChange={(e) => setFormData(role === 'teacher' ? {...formData, password: e.target.value} : {...formData, studentId: e.target.value})}
-                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none"
+                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                     />
                                 </div>
                             </div>
@@ -273,20 +413,44 @@ const CustomLogin = ({ onLoginSuccess }) => {
                         <form onSubmit={handlePledgeSubmit} className="space-y-6 animate-spring-up">
                             <div className="space-y-2">
                                 <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight text-center">스터디카페 사용 신청</h2>
-                                <p className="text-[11px] text-ios-gray text-center font-bold">이용을 위해 다음 서약서 내용을 확인해 주세요.</p>
+                                <p className="text-[11px] text-ios-gray text-center font-bold">본인은 자기주도학습에 참여함에 있어 올바른 학습 태도와 공동체 질서를 준수하며, 자기주도적 학습 능력 신장을 도모하고자 다음 사항을 성실히 이행할 것을 서약합니다.</p>
                             </div>
 
                             <div className="bg-gray-50 rounded-2xl p-4 max-h-48 overflow-y-auto space-y-4 text-[11px] font-bold text-ios-gray leading-relaxed border border-gray-100">
                                 <div className="space-y-2">
                                     <p className="text-[#1C1C1E] font-black">[행동 지침 및 주의 사항]</p>
-                                    <p>1. 학습실 내에서는 절대 정숙하며 타인에게 방해가 되는 행동을 하지 않습니다.</p>
-                                    <p>2. 지정된 좌석 외에 무단으로 자리를 점유하지 않습니다.</p>
-                                    <p>3. 시설물을 청결히 사용하며 파손 시 책임을 집니다.</p>
+                                    <p>1. 학습실 내에서는 항상 정숙을 유지하며, 타인의 학습에 방해가 되는 언행을 하지 않습니다.</p>
+                                    <p>2. 지정된 좌석 외의 자리를 무단으로 사용하거나 이동하지 않습니다.</p>
+                                    <p>3. 학습 시간을 철저하게 지켜야 하며 무단 이탈, 취식, 전자기기 오남용 등의 행위를 하지 않습니다.</p>
+                                    <p>4. 청람재 내 모든 시설물은 깨끗이 사용하며, 고의 또는 과실로 파손 시 이에 대한 책임을 집니다.</p>
+                                    <p>5. 지도 교사 및 운영 규정을 성실히 따르며, 위반 시 불이익이 있을 수 있음을 인지합니다.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <p className="text-[#1C1C1E] font-black">[학습 태도 및 자기주도 학습]</p>
+                                    <p>1. 스스로 학습 목표를 설정하고, 목표 달성을 위해 문제 해결 과정을 주도적으로 수행합니다.</p>
+                                    <p>2. 자기주도학습을 단순한 체류 시간이 아닌 자기 성장의 시간으로 활용합니다.</p>
+                                    <p>3. 올바른 학습 습관 형성을 위해 성실하고 책임감 있는 태도로 참여합니다.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <p className="text-[#1C1C1E] font-black">[가정과 연계한 생활 지도]</p>
+                                    <p>1. 효율적이고 건전한 학습 및 생활 습관을 형성할 수 있도록 가정과 연계하여 지도에 협조합니다.</p>
+                                    <p>2. 학생과 학부모가 야간자율학습의 취지와 운영 방침을 충분히 이해하고 이에 동의합니다.</p>
+                                </div>                                
+                                <div className="space-y-2">
+                                    <p className="text-[#1C1C1E] font-black">[안전 및 학교폭력 예방]</p>
+                                    <p>1. 쾌적하고 안전한 학습 환경 조성을 위해 질서를 준수합니다.</p>
+                                    <p>2. 학교폭력 예방 교육 및 안전 관리 지침을 성실히 따르며, 타인을 존중하는 태도를 유지합니다.</p>
+                                    <p>3. 자기주도학습 종료 후, 곧바로 귀가합니다.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <p className="text-[#1C1C1E] font-black">[감염병 예방 및 위생 수칙]</p>
+                                    <p>1. 감염병 확산 예방을 위해 개인 위생 수칙 및 학교의 방역 지침을 철저히 준수합니다.</p>
+                                    <p>2. 발열 및 이상 증상이 있을 경우 즉시 지도 교사에게 알립니다.</p>
                                 </div>
                                 <div className="space-y-2">
                                     <p className="text-[#1C1C1E] font-black">[개인정보 활용 동의]</p>
-                                    <p>서비스 제공을 위해 휴대폰 번호를 수집하며, 이는 로그인 신원 확인 용도로만 사용됩니다.</p>
-                                    <p>수집된 개인정보는 본 학년도의 청람재 운영 종료 후 자동 파기됩니다.</p>
+                                    <p>1. 자기주도학습 운영 및 서비스 제공을 위해 학생의 휴대전화 번호를 수집하는 것에 동의합니다.</p>
+                                    <p>2. 수집된 개인정보는 로그인 및 신원 확인 용도로만 사용되며, 본 학년도 자기주도학습 운영 종료 후 자동 파기됩니다.</p>
                                 </div>
                             </div>
 
@@ -300,7 +464,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         placeholder="본인 휴대폰 번호 (자동 하이픈)"
                                         value={formData.phone}
                                         onChange={(e) => setFormData({...formData, phone: autoHyphen(e.target.value)})}
-                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none"
+                                        className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                     />
                                 </div>
 
@@ -311,7 +475,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         onChange={(e) => setFormData({...formData, pledgeAccepted: e.target.checked})}
                                         className="mt-0.5"
                                     />
-                                    <span className="text-[11px] font-black text-[#1C1C1E]">행동 지침 및 서약 사항을 확인했습니다. (필수)</span>
+                                    <span className="text-[11px] font-black text-[#1C1C1E]">행동 지침 및 기타 서약 사항을 확인했습니다. (필수)</span>
                                 </label>
                                 <label className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-all border border-transparent hover:border-gray-200">
                                     <input 
@@ -322,6 +486,50 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                     />
                                     <span className="text-[11px] font-black text-[#1C1C1E]">개인정보 수집 및 활용에 동의합니다. (필수)</span>
                                 </label>
+
+                                {/* Signature Pads */}
+                                <div className="space-y-4 pt-4 border-t border-gray-100">
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-black text-[#1C1C1E]">학생 서명</span>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => studentSigPad.current?.clear()}
+                                                className="text-[10px] text-ios-gray font-bold flex items-center gap-1 hover:text-ios-rose transition-colors"
+                                            >
+                                                <Eraser className="w-3 h-3" /> 지우기
+                                            </button>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden h-32 relative">
+                                            <InlineSignaturePad 
+                                                ref={studentSigPad}
+                                                penColor="#1C1C1E"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-black text-[#1C1C1E]">학부모 서명</span>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => parentSigPad.current?.clear()}
+                                                className="text-[10px] text-ios-gray font-bold flex items-center gap-1 hover:text-ios-rose transition-colors"
+                                            >
+                                                <Eraser className="w-3 h-3" /> 지우기
+                                            </button>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-2xl border border-gray-100 overflow-hidden h-32 relative">
+                                            <InlineSignaturePad 
+                                                ref={parentSigPad}
+                                                penColor="#1C1C1E"
+                                            />
+                                        </div>
+                                        <p className="text-[10px] text-ios-rose font-black text-center pt-1 animate-pulse">
+                                            주의. 반드시 학부모님께서 직접 서명하셔야 합니다.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
 
                             {error && (
@@ -402,7 +610,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                     placeholder={role === 'parent' ? "자녀의 휴대폰 번호" : "등록된 휴대폰 번호"}
                                     value={formData.phone}
                                     onChange={(e) => setFormData({...formData, phone: autoHyphen(e.target.value)})}
-                                    className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none"
+                                    className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                 />
                             </div>
 

@@ -66,14 +66,14 @@ const SignaturePad = ({ onSave, onCancel, teacherName }) => {
 
     return (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col justify-end">
-            <div className="bg-white rounded-t-[32px] p-6 mobile-slide-up h-[70vh]">
+            <div className="bg-white/90 backdrop-blur-2xl rounded-t-[32px] p-6 mobile-slide-up h-[70vh] border-t border-white/20">
                 <div className="flex justify-between items-center mb-8">
                     <div>
-                        <h2 className="text-2xl font-black text-[#1C1C1E]">{teacherName}님</h2>
-                        <p className="text-ios-gray text-sm font-bold">오늘의 감독 확인을 위해 서명해 주세요.</p>
+                        <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{teacherName}님</h2>
+                        <p className="text-ios-gray text-sm font-bold opacity-70">오늘의 감독 확인을 위해 서명해 주세요.</p>
                     </div>
-                    <button onClick={onCancel} className="p-2 bg-gray-100 rounded-full">
-                        <LogOut className="w-5 h-5 text-ios-gray" />
+                    <button onClick={onCancel} className="p-2.5 bg-gray-100/50 rounded-apple-md ios-tap">
+                        <X className="w-5 h-5 text-ios-gray" />
                     </button>
                 </div>
 
@@ -98,13 +98,13 @@ const SignaturePad = ({ onSave, onCancel, teacherName }) => {
                             ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
                             setHasDrawn(false);
                         }}
-                        className="py-4 bg-gray-100 text-[#1C1C1E] rounded-2xl font-black mobile-tap-feedback"
+                        className="py-4 bg-gray-100/80 text-[#1C1C1E] rounded-apple-md font-black ios-tap"
                     >
                         다시 그리기
                     </button>
                     <button 
                         onClick={handleSave}
-                        className="py-4 bg-[#007AFF] text-white rounded-2xl font-black mobile-tap-feedback shadow-lg"
+                        className="py-4 bg-[#007AFF] text-white rounded-apple-md font-black ios-tap shadow-lg shadow-blue-500/20"
                     >
                         서명 저장
                     </button>
@@ -378,35 +378,30 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const absentCount = filteredStatsData.filter(d => d.is_active && (d.status === 'absent' || !d.status)).length;
 
         return (
-            <header className="mobile-header pb-3.5">
-                <div className="flex justify-between items-center mb-5">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-gray-50 rounded-full shadow-sm border border-gray-100/50">
-                            <Menu className="w-5 h-5 text-gray-400" strokeWidth={2.5} />
-                        </div>
-                        <h1 className="text-[20px] font-black text-[#1C1C1E] tracking-tight">
-                            학습실 감독
-                        </h1>
+            <header className="flex-none glass-header px-6 pt-10 pb-4 flex flex-col gap-5 z-50">
+                <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                        <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">학습실 감독</h1>
+                        <p className="text-[10px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70">Study Cafe Manager</p>
                     </div>
                     <div className="flex items-center gap-2">
                         {currentView === 'attendance' && (
                             <button 
                                 onClick={() => setCurrentView('seatmap')}
-                                className="px-3.5 py-2.5 bg-[#F0F7FF] text-[#007AFF] rounded-xl active:scale-95 transition-all text-[13px] font-black flex items-center gap-2 border border-blue-50"
+                                className="p-2.5 bg-ios-indigo/10 text-ios-indigo rounded-apple-md ios-tap border border-ios-indigo/10"
                             >
-                                <MapIcon className="w-4 h-4" />
-                                좌석표
+                                <MapIcon className="w-5 h-5" />
                             </button>
                         )}
                         {currentView !== 'menu' ? (
                             <button 
                                 onClick={() => setCurrentView(currentView === 'seatmap' ? 'attendance' : 'menu')}
-                                className="px-4 py-2.5 bg-gray-50 text-[#8E8E93] rounded-xl active:scale-95 transition-all text-[13px] font-black border border-gray-100/50"
+                                className="px-4 py-2.5 bg-gray-200/20 text-ios-gray rounded-apple-md ios-tap border border-white/40 text-[13px] font-black"
                             >
                                 {currentView === 'seatmap' ? '뒤로' : '메뉴'}
                             </button>
                         ) : (
-                            <button onClick={handleLogout} className="p-2.5 bg-rose-50 text-[#FF3B30] rounded-full active:scale-95 transition-all border border-rose-100/50">
+                            <button onClick={handleLogout} className="p-2.5 bg-ios-rose/10 text-ios-rose rounded-apple-md ios-tap border border-ios-rose/10">
                                 <LogOut className="w-5 h-5" />
                             </button>
                         )}
@@ -417,27 +412,25 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                     <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-top-4 duration-300">
                         {/* Zone Selection & Date Navigation */}
                         <div className="flex gap-2 items-stretch">
-                            {/* Improved Zone Selection Chip */}
-                            <div className="flex-1 bg-[#1C1C1E] p-1 rounded-[6px] shadow-lg shadow-black/10 flex items-center justify-center min-h-[36px]">
-                                <span className="text-[12px] font-black text-white px-2">
+                            <div className="flex-1 bg-gray-200/20 p-1 rounded-apple-md border border-white/40 flex items-center justify-center min-h-[38px] backdrop-blur-xl">
+                                <span className="text-[12px] font-black text-[#1C1C1E] px-2">
                                     {zoneName}
                                 </span>
                             </div>
 
-                            {/* Refined Date Navigator */}
-                            <div className="flex-1 flex items-center justify-between bg-white px-2 rounded-[6px] border border-gray-100 shadow-sm min-h-[36px]">
+                            <div className="flex-[2] flex items-center justify-between bg-gray-200/20 px-2 rounded-apple-md border border-white/40 backdrop-blur-xl min-h-[38px]">
                                 <button 
                                     onClick={() => changeDate(-1)}
-                                    className="w-8 h-8 flex items-center justify-center text-gray-300 active:text-[#1C1C1E] transition-colors"
+                                    className="w-8 h-8 flex items-center justify-center text-ios-gray ios-tap"
                                 >
                                     <ChevronLeft className="w-4 h-4" />
                                 </button>
-                                <span className="text-[11px] font-black text-[#1C1C1E] tracking-tight">
-                                    {selectedDate} ({['일','월','화','수','목','금','토'][new Date(selectedDate).getDay()]})
+                                <span className="text-[11px] font-black text-[#1C1C1E]">
+                                    {selectedDate.substring(5)} ({['일','월','화','수','목','금','토'][new Date(selectedDate).getDay()]})
                                 </span>
                                 <button 
                                     onClick={() => changeDate(1)}
-                                    className="w-8 h-8 flex items-center justify-center text-gray-300 active:text-[#1C1C1E] transition-colors"
+                                    className="w-8 h-8 flex items-center justify-center text-ios-gray ios-tap"
                                 >
                                     <ChevronRight className="w-4 h-4" />
                                 </button>
@@ -447,13 +440,13 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                         {/* Attendance-specific controls */}
                         {(currentView === 'attendance' || currentView === 'seatmap') && (
                             <>
-                                <div className="flex bg-gray-50/50 p-1 rounded-xl border border-gray-100 overflow-x-auto scrollbar-hide">
+                                <div className="flex bg-gray-200/20 p-1 rounded-apple-md border border-white/40 overflow-x-auto scrollbar-hide">
                                     {sessions.map(s => (
                                         <button
                                             key={s.id}
                                             onClick={() => setActiveSession(s.id)}
-                                            className={`flex-1 px-3 py-2.5 rounded-lg text-xs font-black whitespace-nowrap transition-all ${
-                                                activeSession === s.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-gray-400'
+                                            className={`flex-1 px-3 py-2.5 rounded-apple-md text-xs font-black whitespace-nowrap transition-all ios-tap ${
+                                                activeSession === s.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray'
                                             }`}
                                         >
                                             {s.name}
@@ -462,13 +455,13 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                 </div>
 
                                 <div className="flex gap-3 h-20">
-                                    <div className="flex-1 bg-blue-50/50 p-3 rounded-2xl border border-blue-100 flex flex-col justify-center items-center font-black">
-                                        <span className="text-[10px] text-[#007AFF] uppercase tracking-wider mb-1">현재 출석</span>
-                                        <span className="text-2xl text-[#007AFF]">{presentCount}명</span>
+                                    <div className="flex-1 bg-white shadow-sm border border-gray-100 rounded-apple p-3 flex flex-col justify-center items-center font-black">
+                                        <span className="text-[10px] text-ios-blue uppercase tracking-wider mb-1">현재 출석</span>
+                                        <span className="text-2xl text-[#1C1C1E]">{presentCount}명</span>
                                     </div>
-                                    <div className="flex-1 bg-rose-50/50 p-3 rounded-2xl border border-rose-100 flex flex-col justify-center items-center font-black">
-                                        <span className="text-[10px] text-[#FF3B30] uppercase tracking-wider mb-1">미입실/결석</span>
-                                        <span className="text-2xl text-[#FF3B30]">{absentCount}명</span>
+                                    <div className="flex-1 bg-white shadow-sm border border-gray-100 rounded-apple p-3 flex flex-col justify-center items-center font-black">
+                                        <span className="text-[10px] text-ios-rose uppercase tracking-wider mb-1">미입실/결석</span>
+                                        <span className="text-2xl text-[#1C1C1E]">{absentCount}명</span>
                                     </div>
                                 </div>
                             </>

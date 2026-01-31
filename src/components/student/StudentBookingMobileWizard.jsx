@@ -15,6 +15,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const [quarters, setQuarters] = useState([]);
   const [operationalSessions, setOperationalSessions] = useState([]);
   const [zones, setZones] = useState([]);
+  const [userActivities, setUserActivities] = useState({}); // { 'yyyy-MM-dd': status }
   
   // Booking Data State
   const [selectedDate, setSelectedDate] = useState(null);
@@ -42,7 +43,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   };
 
   // Operation Rules State
-  const [operationDefaults, setOperationDefaults] = useState([]);
+  const [operatingRules, setOperatingRules] = useState([]);
   const [operationExceptions, setOperationExceptions] = useState([]);
   const [zoneSeats, setZoneSeats] = useState([]);
 
@@ -108,13 +109,21 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                  supabase.from('seats')
                     .select('*')
                     .eq('zone_id', selectedZoneId)
-                    .order('global_number') 
+                    .order('global_number')
             ]);
 
             setOperationalSessions(sRes.data || []);
-            setOperationDefaults(dRes.data || []);
             setOperationExceptions(eRes.data || []);
-            setZoneSeats(seatsRes.data || []); // New state for seats
+            setZoneSeats(seatsRes.data || []);
+            
+            // Fetch operating rules from session_operating_days
+            const { data: rulesData } = await supabase
+                .from('session_operating_days')
+                .select('session_id, day_of_week')
+                .in('session_id', (sRes.data || []).map(s => s.id))
+                .eq('is_active', true);
+            
+            setOperatingRules(rulesData || []);
             
             // Auto-detect initial section if possible
             const seats = seatsRes.data || [];
@@ -138,6 +147,64 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
     
     fetchZoneData();
   }, [selectedZoneId]);
+
+  // --- User Activity Fetch (for Calendar) ---
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const fetchUserActivities = async () => {
+        try {
+            const { data: bookings } = await supabase
+                .from('bookings')
+                .select(`
+                    date,
+                    attendance (
+                        status
+                    )
+                `)
+                .eq('user_id', currentUser.id);
+            
+            if (bookings) {
+                const activityMap = {};
+                const todayStr = format(new Date(), 'yyyy-MM-dd');
+                
+                bookings.forEach(b => {
+                    const d = b.date;
+                    const att = b.attendance && b.attendance[0];
+                    
+                    let status = 'reserved';
+                    if (d < todayStr) {
+                        if (att) {
+                            if (att.status === 'present') status = 'present';
+                            else if (att.status === 'late') status = 'late';
+                            else status = 'absent';
+                        } else {
+                            status = 'absent';
+                        }
+                    } else if (d === todayStr) {
+                        // For today, if already attended, show it
+                        if (att) {
+                            if (att.status === 'present') status = 'present';
+                            else if (att.status === 'late') status = 'late';
+                        }
+                    }
+                    
+                    // Prioritize positive statuses if multiple bookings exist for a day
+                    if (!activityMap[d] || 
+                        (status === 'present' && activityMap[d] !== 'present') ||
+                        (status === 'late' && activityMap[d] === 'absent')) {
+                        activityMap[d] = status;
+                    }
+                });
+                setUserActivities(activityMap);
+            }
+        } catch (err) {
+            console.error("Error fetching user activities:", err);
+        }
+    };
+    
+    fetchUserActivities();
+  }, [currentUser]);
 
   // --- Helper: Date Logic ---
   const isDateBookable = (date) => {
@@ -176,10 +243,8 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
 
     // Rule D: Weekly Defaults (Open this day?)
     const dayOfWeek = target.getDay(); // 0-6
-    const def = operationDefaults.find(d => d.day_of_week === dayOfWeek);
-    // If no default config, or all flags false, assume closed
-    if (!def) return false; // Strict safety
-    if (!def.morning && !def.dinner && !def.period1 && !def.period2) return false;
+    const hasAnyPeriod = operatingRules.some(r => r.day_of_week === dayOfWeek);
+    if (!hasAnyPeriod) return false;
 
     return true;
   };
@@ -245,6 +310,8 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     
                     const available = isDateBookable(date);
                     const isSelected = selectedDate && isSameDay(date, selectedDate);
+                    const dateStr = format(date, 'yyyy-MM-dd');
+                    const activity = userActivities[dateStr];
                     
                     return (
                         <button
@@ -254,18 +321,50 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                             className={`
                                 aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all relative
                                 ${isSelected 
-                                    ? 'bg-[#1C1C1E] text-white shadow-lg scale-105 z-10' 
-                                    : available 
+                                    ? 'bg-[#1C1C1E] text-white shadow-xl scale-105 z-10' 
+                                    : activity === 'present' ? 'bg-ios-emerald/10 text-ios-emerald' :
+                                      activity === 'late' ? 'bg-ios-amber/10 text-ios-amber' :
+                                      activity === 'absent' ? 'bg-ios-rose/10 text-ios-rose' :
+                                      activity === 'reserved' ? 'bg-ios-indigo/10 text-ios-indigo' :
+                                      available 
                                         ? 'bg-white text-[#1C1C1E] border border-gray-100 hover:border-gray-300' 
                                         : 'bg-transparent text-gray-400 cursor-not-allowed' 
                                 }
                             `}
                         >
-                            <span className={!available ? 'opacity-50' : ''}>{format(date, 'd')}</span>
-                            {available && <span className="w-1 h-1 rounded-full bg-ios-indigo absolute bottom-2" />}
+                            <span className={!available && !activity ? 'opacity-50' : ''}>{format(date, 'd')}</span>
+                            {activity && (
+                                <span className={`w-1.5 h-1.5 rounded-full absolute bottom-2 ${
+                                    isSelected ? 'bg-white' :
+                                    activity === 'present' ? 'bg-ios-emerald' :
+                                    activity === 'late' ? 'bg-ios-amber' :
+                                    activity === 'absent' ? 'bg-ios-rose' :
+                                    'bg-ios-indigo'
+                                }`} />
+                            )}
                         </button>
                     );
                 })}
+            </div>
+
+            {/* Activity Legend */}
+            <div className="mt-6 pt-4 border-t border-gray-100">
+                <div className="flex flex-col gap-3">
+                    <span className="text-[11px] font-black text-ios-gray uppercase tracking-[0.2em]">활동 지표</span>
+                    <div className="flex flex-wrap gap-4">
+                        {[
+                            { label: '출석', color: 'bg-ios-emerald' },
+                            { label: '지각', color: 'bg-ios-amber' },
+                            { label: '결석', color: 'bg-ios-rose' },
+                            { label: '예약', color: 'bg-ios-indigo' }
+                        ].map(leg => (
+                            <div key={leg.label} className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${leg.color}`} />
+                                <span className="text-[10px] font-bold text-gray-400">{leg.label}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
         </div>
     );
@@ -287,33 +386,10 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             <p className="text-sm font-bold text-ios-gray">이용할 시간을 모두 선택해주세요.<br/>(복수 선택 가능)</p>
             <div className="space-y-3 mt-4">
                 {operationalSessions.filter(session => {
-                     // Filter based on selected Date and Operation Defaults
+                     // Filter based on selected Date and operatingRules
                      if (!selectedDate) return false;
                      const dayOfWeek = selectedDate.getDay();
-                     const def = operationDefaults.find(d => d.day_of_week === dayOfWeek);
-                     if (!def) return false;
-
-                     // Check both English and Korean keywords
-                     const sName = session.name.toLowerCase();
-                     
-                     // 1. Morning (조회, 오전, morning)
-                     if (sName.includes('morning') || sName.includes('조회') || sName.includes('오전')) {
-                         return def.morning;
-                     }
-                     // 2. Dinner (석식, 저녁, dinner)
-                     if (sName.includes('dinner') || sName.includes('석식') || sName.includes('저녁')) {
-                         return def.dinner;
-                     }
-                     // 3. 1st Period (1st, 1차, period1)
-                     if (sName.includes('1st') || sName.includes('1차') || sName.includes('period1')) {
-                         return def.period1;
-                     }
-                     // 4. 2nd Period (2nd, 2차, period2)
-                     if (sName.includes('2nd') || sName.includes('2차') || sName.includes('period2')) {
-                         return def.period2;
-                     }
-                     
-                     return false;
+                     return operatingRules.some(r => r.session_id === session.id && r.day_of_week === dayOfWeek);
                 }).map(session => {
                     const isSelected = selectedSessionIds.includes(session.id);
                     return (
@@ -796,6 +872,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             <SeatMapModal 
                 isOpen={showSeatMap}
                 zoneId={selectedZoneId} 
+                selectedDate={selectedDate}
                 onClose={() => setShowSeatMap(false)} 
                 onSelect={(seatData) => {
                     if (seatData) {

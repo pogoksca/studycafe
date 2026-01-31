@@ -61,11 +61,7 @@ const AttendancePrint = () => {
                 .order('start_time', { ascending: true });
             if (sData) {
                 setSessions(sData);
-                // Default: select sessions that contain '차시' or '교시'
-                const defaultSessions = sData
-                    .filter(s => s.name.includes('차시') || s.name.includes('교시'))
-                    .map(s => s.id);
-                setSelectedSessions(defaultSessions);
+                setSelectedSessions(sData.map(s => s.id));
             }
         }
         setLoading(false);

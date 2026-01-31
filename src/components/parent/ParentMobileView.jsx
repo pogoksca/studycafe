@@ -220,8 +220,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     return (
       <div className="h-full p-4 flex flex-col gap-2 animate-fade-in relative scrollbar-hide">
         {/* Status Hero Card (50%) */}
-        <div className="flex-[2] bg-white rounded-[2rem] pt-8 pb-5 px-5 shadow-sm border border-gray-100 flex flex-col items-center text-center relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-ios-indigo/5 blur-3xl -z-10" />
+        <div className="flex-[2] glass-card pt-8 pb-5 px-5 flex flex-col items-center text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-ios-indigo/10 blur-3xl -z-10" />
           
           <div className={`px-6 py-2 rounded-full text-[13px] font-black uppercase tracking-widest ${status.color} shadow-lg shadow-current/10`}>
             {status.label}
@@ -252,14 +252,14 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         </div>
 
         {/* All Sessions Schedule (25%) */}
-        <div className="flex-1 bg-white rounded-[1.5rem] p-4 border border-gray-100 shadow-sm flex flex-col justify-center space-y-2">
-            <div className="flex items-center gap-2 mb-1">
-                <div className="w-8 h-8 rounded-full bg-ios-blue/10 flex items-center justify-center">
-                    <Clock className="w-4 h-4 text-ios-blue" />
+        <div className="flex-1 glass-card p-5 flex flex-col justify-center space-y-2">
+            <div className="flex items-center justify-between mb-1">
+                <h3 className="text-[10px] font-black text-ios-gray uppercase tracking-widest">오늘의 학습 일정</h3>
+                <div className="flex items-center gap-1">
+                    <div className="w-1 h-1 rounded-full bg-ios-emerald shadow-[0_0_8px_rgba(52,199,89,0.5)]" />
+                    <span className="text-[8px] font-black text-ios-emerald uppercase">Live</span>
                 </div>
-                <h2 className="text-[15px] font-black text-[#1C1C1E]">오늘의 학습 일정</h2>
             </div>
-            
             <div className="space-y-2 overflow-y-auto max-h-[120px] pr-1 scrollbar-hide">
                 {todayData.bookings.length > 0 ? todayData.bookings.map((booking, idx) => {
                     const att = booking.attendance?.[0];
@@ -290,24 +290,19 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         </div>
 
         {/* Weekly Dashboard Calendar (25%) */}
-        <div className="flex-1 bg-white rounded-[1.5rem] border border-gray-100 shadow-sm p-4 flex flex-col justify-center space-y-3">
-            <div className="flex items-center justify-between">
+        <div className="flex-1 glass-card p-5 flex flex-col justify-center items-center">
+            <div className="w-full flex items-center justify-between mb-3 px-1">
+                <h3 className="text-[10px] font-black text-ios-gray uppercase tracking-widest">이번 주 학습 현황</h3>
                 <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-ios-indigo/10 flex items-center justify-center">
-                         <Calendar className="w-4 h-4 text-ios-indigo" />
-                    </div>
-                    <h2 className="text-[15px] font-black text-[#1C1C1E]">주간 학습 현황</h2>
-                </div>
-                <div className="flex items-center gap-1 bg-gray-50 rounded-full px-2 py-0.5">
-                    <button onClick={handlePrevWeek} className="p-1 hover:text-black text-gray-400"><ChevronLeft className="w-3 h-3" /></button>
-                    <span className="text-[9px] font-bold text-[#1C1C1E] min-w-[70px] text-center">
-                        {format(startOfWeek(currentCalendarDate, { weekStartsOn: 1 }), 'M/dd')} - {format(endOfWeek(currentCalendarDate, { weekStartsOn: 1 }), 'M/dd')}
+                    <span className="text-[10px] font-black text-[#1C1C1E]">
+                        {format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'MM.dd')} - {format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'MM.dd')}
                     </span>
-                    <button onClick={handleNextWeek} className="p-1 hover:text-black text-gray-400"><ChevronRight className="w-3 h-3" /></button>
+                    <button onClick={handlePrevWeek} className="p-1 hover:text-black text-gray-400 ios-tap"><ChevronLeft className="w-3 h-3" /></button>
+                    <button onClick={handleNextWeek} className="p-1 hover:text-black text-gray-400 ios-tap"><ChevronRight className="w-3 h-3" /></button>
                 </div>
             </div>
 
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center w-full">
                 {eachDayOfInterval({ 
                     start: startOfWeek(currentCalendarDate, { weekStartsOn: 1 }), 
                     end: endOfWeek(currentCalendarDate, { weekStartsOn: 1 }) 
@@ -348,12 +343,12 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
   const renderStats = () => {
     return (
       <div className="p-5 space-y-6 animate-fade-in scrollbar-hide">
-        <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-gray-100 relative overflow-hidden">
+        <div className="glass-card p-8 relative overflow-hidden">
             <div className="flex items-center gap-2 mb-6 text-ios-indigo"><BarChart3 className="w-4 h-4" /><h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3></div>
             <div className="grid grid-cols-3 gap-2">
-                <div className="flex flex-col items-center p-4 bg-ios-emerald/5 rounded-2xl"><span className="text-[10px] font-black text-ios-emerald uppercase opacity-60 mb-1">이수</span><span className="text-2xl font-black text-ios-emerald">{stats.present}</span></div>
-                <div className="flex flex-col items-center p-4 bg-ios-amber/5 rounded-2xl"><span className="text-[10px] font-black text-ios-amber uppercase opacity-60 mb-1">지각</span><span className="text-2xl font-black text-ios-amber">{stats.late}</span></div>
-                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-2xl"><span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span><span className="text-2xl font-black text-ios-rose">{stats.absent}</span></div>
+                <div className="flex flex-col items-center p-4 bg-ios-emerald/5 rounded-apple"><span className="text-[10px] font-black text-ios-emerald uppercase opacity-60 mb-1">이수</span><span className="text-2xl font-black text-ios-emerald">{stats.present}</span></div>
+                <div className="flex flex-col items-center p-4 bg-ios-amber/5 rounded-apple"><span className="text-[10px] font-black text-ios-amber uppercase opacity-60 mb-1">지각</span><span className="text-2xl font-black text-ios-amber">{stats.late}</span></div>
+                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-apple"><span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span><span className="text-2xl font-black text-ios-rose">{stats.absent}</span></div>
             </div>
         </div>
         <div className="space-y-3">
@@ -363,7 +358,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
             </div>
             <div className="space-y-2">
                 {stats.history.length > 0 ? stats.history.map((h, i) => (
-                    <div key={i} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between">
+                    <div key={i} className="bg-white p-4 rounded-apple border border-gray-100 shadow-sm flex items-center justify-between">
                         <div className="flex items-center gap-4">
                             <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : 'bg-ios-rose'}`} />
                             <div className="space-y-0.5">
@@ -388,29 +383,17 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
   return (
     <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
-      <header className="flex-none bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-5 py-3 flex items-center justify-between z-50 sticky top-0 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-3">
-           <div className="w-10 h-10 rounded-[10px] bg-[#1C1C1E] flex items-center justify-center shadow-sm"><Layout className="w-5 h-5 text-white" /></div>
-           <div>
-             <h1 className="text-[17px] font-black text-[#1C1C1E] tracking-tighter leading-tight uppercase">{schoolName.split(' ')[0]}</h1>
-             <p className="text-[9px] font-black tracking-[0.2em] text-ios-indigo uppercase opacity-80 leading-none mt-0.5">PARENT VIEW</p>
-           </div>
+      <header className="flex-none glass-header px-6 pt-10 pb-4 flex items-center justify-between shadow-sm">
+        <div className="flex flex-col">
+            <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{schoolName.split(' ')[0]}</h1>
+            <p className="text-[10px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70">PARENT VIEW</p>
         </div>
-        <div className="flex items-center gap-4">
-            <div className="text-right">
-                <p className="text-[13px] font-black text-[#1C1C1E]">{currentUser?.full_name}</p>
-                <p className="text-[10px] font-black text-ios-gray leading-none mt-0.5">
-                    {format(new Date(), 'M월 d일 (EEE)', { locale: ko })}
-                </p>
-            </div>
-            <button 
-                onClick={onLogout}
-                className="w-10 h-10 rounded-full bg-ios-rose/5 flex items-center justify-center text-ios-rose hover:bg-ios-rose/10 transition-colors"
-                title="로그아웃"
-            >
-                <LogOut className="w-5 h-5" />
-            </button>
-        </div>
+        <button 
+            onClick={onLogout}
+            className="p-3 bg-gray-200/20 text-ios-gray hover:text-ios-rose hover:bg-ios-rose/10 rounded-apple-md transition-all ios-tap border border-white/40 backdrop-blur-xl"
+        >
+          <LogOut className="w-5 h-5" />
+        </button>
       </header>
       <main className="flex-1 overflow-hidden relative">
           {loading ? (
@@ -421,7 +404,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
             </div>
           )}
       </main>
-      <nav className="flex-none bg-white border-t border-gray-200/50 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 px-16 flex justify-around items-center z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+      {/* Bottom Navigation */}
+      <nav className="flex-none glass-material pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 px-16 flex justify-around items-center z-50 shadow-[0_-4px_40px_rgba(0,0,0,0.03)] border-t border-white/40">
         {[
           { id: 'home', icon: Home, label: '모니터링' },
           { id: 'stats', icon: BarChart3, label: '통계' },
@@ -429,9 +413,9 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
           <button 
             key={item.id} 
             onClick={() => setActiveTab(item.id)} 
-            className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-300 w-20 group ${activeTab === item.id ? 'text-[#1C1C1E]' : 'text-gray-300 hover:text-gray-500'}`}
+            className={`flex flex-col items-center justify-center p-2 rounded-apple-md transition-all duration-300 w-20 group ios-tap ${activeTab === item.id ? 'text-[#1C1C1E]' : 'text-gray-300 hover:text-gray-500'}`}
           >
-            <item.icon className={`w-7 h-7 stroke-[2.5px] ${activeTab === item.id ? 'fill-current' : 'fill-transparent'}`} />
+            <item.icon className={`w-7 h-7 stroke-[2.5px] ${activeTab === item.id ? 'fill-ios-indigo/10' : 'fill-transparent'}`} />
             <span className={`text-[9px] font-black mt-1`}>
                 {item.label}
             </span>

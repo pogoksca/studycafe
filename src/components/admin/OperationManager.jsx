@@ -38,6 +38,7 @@ const OperationManager = () => {
     const [quarters, setQuarters] = useState([]);
     const [defaults, setDefaults] = useState([]);
     const [exceptions, setExceptions] = useState([]);
+    const [sessions, setSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [savingQuarters, setSavingQuarters] = useState(false);
     const [savingDefaults, setSavingDefaults] = useState(false);
@@ -72,7 +73,7 @@ const OperationManager = () => {
 
     const fetchData = async (year, zoneId) => {
         setLoading(true);
-        const [qData, dData, eData] = await Promise.all([
+        const [qData, dData, eData, sData] = await Promise.all([
             supabase.from('operation_quarters')
                 .select('*')
                 .eq('academic_year', year)
@@ -84,8 +85,15 @@ const OperationManager = () => {
             supabase.from('operation_exceptions')
                 .select('*')
                 .eq('zone_id', zoneId)
-                .order('exception_date', { ascending: true })
+                .order('exception_date', { ascending: true }),
+            supabase.from('sessions')
+                .select('*')
+                .eq('zone_id', zoneId)
+                .order('start_time', { ascending: true })
         ]);
+
+        const loadedSessions = sData.data || [];
+        setSessions(loadedSessions);
 
         const existingQuarters = qData.data || [];
         const minQuarters = [1, 2, 3, 4];
@@ -96,18 +104,21 @@ const OperationManager = () => {
         const extraQuarters = existingQuarters.filter(q => q.quarter > 4);
         setQuarters([...merged, ...extraQuarters].sort((a, b) => a.quarter - b.quarter));
 
-        if (dData.data && dData.data.length > 0) {
-            setDefaults(dData.data);
-        } else {
-            setDefaults([0, 1, 2, 3, 4, 5, 6].map(d => ({
-                zone_id: zoneId,
-                day_of_week: d,
-                morning: false,
-                dinner: false,
-                period1: false,
-                period2: false
-            })));
-        }
+        // Fetch operating rules from session_operating_days
+        const { data: rulesData } = await supabase
+            .from('session_operating_days')
+            .select('session_id, day_of_week')
+            .in('session_id', loadedSessions.map(s => s.id))
+            .eq('is_active', true);
+
+        const currentRules = rulesData || [];
+        const freshDefaults = [0, 1, 2, 3, 4, 5, 6].map(d => {
+            const activeSessionIds = currentRules
+                .filter(r => r.day_of_week === d)
+                .map(r => r.session_id);
+            return { day_of_week: d, active_session_ids: activeSessionIds };
+        });
+        setDefaults(freshDefaults);
 
         if (eData.data) setExceptions(eData.data);
         setLoading(false);
@@ -210,26 +221,45 @@ const OperationManager = () => {
         setQuarters([...quarters, { quarter: maxQuarter + 1, start_date: null, end_date: null, academic_year: academicYear }]);
     };
 
-    const handleDefaultToggleLocal = (dayNum, period) => {
-        const updated = defaults.map(d => 
-            d.day_of_week === dayNum ? { ...d, [period]: !d[period] } : d
-        );
-        setDefaults(updated);
+    const handleDefaultToggleLocal = (dayNum, sessionId) => {
+        setDefaults(prev => prev.map(d => {
+            if (d.day_of_week !== dayNum) return d;
+            const newActiveIds = d.active_session_ids.includes(sessionId)
+                ? d.active_session_ids.filter(id => id !== sessionId)
+                : [...d.active_session_ids, sessionId];
+            return { ...d, active_session_ids: newActiveIds };
+        }));
     };
 
     const saveDefaults = async () => {
         setSavingDefaults(true);
-        const { error } = await supabase
-            .from('operation_defaults')
-            .upsert(defaults, { onConflict: 'day_of_week' });
-        
-        if (error) {
-            alert('기본 운영 요일 저장 중 오류가 발생했습니다.');
-        } else {
+        try {
+            // Prepare all rows to upsert
+            const rowsToSave = [];
+            defaults.forEach(d => {
+                // For each day, we ensure entries for all possible sessions in this zone
+                sessions.forEach(s => {
+                    rowsToSave.push({
+                        session_id: s.id,
+                        day_of_week: d.day_of_week,
+                        is_active: d.active_session_ids.includes(s.id)
+                    });
+                });
+            });
+
+            const { error } = await supabase
+                .from('session_operating_days')
+                .upsert(rowsToSave, { onConflict: 'session_id, day_of_week' });
+            
+            if (error) throw error;
+
             alert('기본 운영 요일 설정이 저장되었습니다.');
-            fetchData(academicYear);
+            fetchData(academicYear, selectedZoneId);
+        } catch (error) {
+            alert('기본 운영 요일 저장 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            setSavingDefaults(false);
         }
-        setSavingDefaults(false);
     };
 
 
@@ -366,7 +396,7 @@ const OperationManager = () => {
                     );
                     
                     const dayDefault = defaults.find(d => d.day_of_week === dayOfWeek);
-                    const isOperatingDay = quarter && !exception && (dayDefault?.morning || dayDefault?.dinner || dayDefault?.period1 || dayDefault?.period2);
+                    const isOperatingDay = quarter && !exception && (dayDefault?.active_session_ids?.length > 0);
 
                     return (
                         <div key={i} className={`min-h-[100px] p-2 flex flex-col gap-1 transition-colors border-b border-r border-gray-100 ${
@@ -392,19 +422,17 @@ const OperationManager = () => {
                                 </div>
                             ) : isOperatingDay ? (
                                 <div className="mt-1 flex flex-col gap-0.5">
-                                    {[
-                                        { label: '오전', key: 'morning' },
-                                        { label: '석식', key: 'dinner' },
-                                        { label: '1차', key: 'period1' },
-                                        { label: '2차', key: 'period2' }
-                                    ].map(p => (
-                                        <div key={p.key} className="flex justify-between items-center bg-white/40 rounded-[2px] px-1 py-0.5">
-                                            <span className="text-[8px] font-bold text-ios-gray">{p.label}</span>
-                                            <span className={`text-[8px] font-black uppercase tracking-wider ${dayDefault[p.key] ? 'text-ios-indigo' : 'text-red-600'}`}>
-                                                {dayDefault[p.key] ? 'OPEN' : 'CLOSED'}
-                                            </span>
-                                        </div>
-                                    ))}
+                                    {sessions.map(s => {
+                                        const isActive = dayDefault?.active_session_ids?.includes(s.id);
+                                        return (
+                                            <div key={s.id} className="flex justify-between items-center bg-white/40 rounded-[2px] px-1 py-0.5">
+                                                <span className="text-[8px] font-bold text-ios-gray truncate max-w-[40px]">{s.name}</span>
+                                                <span className={`text-[8px] font-black uppercase tracking-wider ${isActive ? 'text-ios-indigo' : 'text-red-400 opacity-30'}`}>
+                                                    {isActive ? 'ON' : 'OFF'}
+                                                </span>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             ) : null}
                         </div>
@@ -530,29 +558,30 @@ const OperationManager = () => {
                             <Save className="w-3.5 h-3.5" /> 저장하기
                         </button>
                     </div>
-                    <div className="space-y-1 overflow-x-auto">
-                        <div className="grid grid-cols-5 gap-2 pb-2 border-b border-gray-100 mb-2">
+                    <div className="space-y-1 overflow-x-auto min-w-0">
+                        <div className={`grid gap-2 pb-2 border-b border-gray-100 mb-2`} style={{ gridTemplateColumns: `40px repeat(${sessions.length}, minmax(40px, 1fr))` }}>
                             <div className="text-[8px] font-black text-ios-gray uppercase tracking-widest">요일</div>
-                            <div className="text-[8px] font-black text-ios-gray uppercase tracking-widest text-center">오전</div>
-                            <div className="text-[8px] font-black text-ios-gray uppercase tracking-widest text-center">석식</div>
-                            <div className="text-[8px] font-black text-ios-gray uppercase tracking-widest text-center">1차시</div>
-                            <div className="text-[8px] font-black text-ios-gray uppercase tracking-widest text-center">2차시</div>
+                            {sessions.map(s => (
+                                <div key={s.id} className="text-[8px] font-black text-ios-gray uppercase tracking-widest text-center truncate px-1" title={s.name}>
+                                    {s.name}
+                                </div>
+                            ))}
                         </div>
                         {[1, 2, 3, 4, 5, 6, 0].map((dayNum) => {
                             const day = defaults.find(d => d.day_of_week === dayNum) || {
-                                day_of_week: dayNum, morning: false, dinner: false, period1: false, period2: false
+                                day_of_week: dayNum, active_session_ids: []
                             };
                             return (
-                                <div key={dayNum} className="grid grid-cols-5 gap-2 items-center py-2 hover:bg-gray-50 rounded-[4px] transition-colors">
+                                <div key={dayNum} className="grid gap-2 items-center py-2 hover:bg-gray-50 rounded-[4px] transition-colors" style={{ gridTemplateColumns: `40px repeat(${sessions.length}, minmax(40px, 1fr))` }}>
                                     <span className={`text-[10px] font-black ${dayNum === 0 ? 'text-ios-rose' : dayNum === 6 ? 'text-ios-indigo' : 'text-[#1C1C1E]'}`}>
                                         {['일', '월', '화', '수', '목', '금', '토'][dayNum]}
                                     </span>
-                                    {['morning', 'dinner', 'period1', 'period2'].map(p => (
-                                        <div key={p} className="flex justify-center">
+                                    {sessions.map(s => (
+                                        <div key={s.id} className="flex justify-center">
                                             <input 
                                                 type="checkbox" 
-                                                checked={day[p]} 
-                                                onChange={() => handleDefaultToggleLocal(dayNum, p)}
+                                                checked={day.active_session_ids?.includes(s.id)} 
+                                                onChange={() => handleDefaultToggleLocal(dayNum, s.id)}
                                                 className="w-4 h-4 rounded-full border-gray-200 text-ios-indigo focus:ring-ios-indigo/20 transition-all cursor-pointer"
                                             />
                                         </div>

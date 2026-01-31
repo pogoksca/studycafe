@@ -88,21 +88,75 @@ const StudentManagement = () => {
         reader.readAsBinaryString(file);
     };
 
+    const getFileNameFromUrl = (url) => {
+        if (!url) return null;
+        const parts = url.split('/');
+        return parts[parts.length - 1];
+    };
+
     const handleApproval = async (applicant, status, reason = '', role = applicant.role) => {
         setLoading(true);
-        const { error } = await supabase
-            .from('applicant_pool')
-            .update({ status, rejection_reason: reason, role })
-            .eq('id', applicant.id);
 
-        if (error) {
-            alert('상태 변경 실패: ' + error.message);
-        } else {
+        try {
+            // Special handling for reset (moving back to 'applied')
+            if (status === 'applied') {
+                const results = [];
+                
+                // 1. Delete Student Signature if exists
+                if (applicant.student_signature) {
+                    const fileName = getFileNameFromUrl(applicant.student_signature);
+                    if (fileName) {
+                        results.push(supabase.storage.from('student-signatures').remove([fileName]));
+                    }
+                }
+                
+                // 2. Delete Parent Signature if exists
+                if (applicant.parent_signature) {
+                    const fileName = getFileNameFromUrl(applicant.parent_signature);
+                    if (fileName) {
+                        results.push(supabase.storage.from('parent-signatures').remove([fileName]));
+                    }
+                }
+                
+                // Wait for storage deletions
+                if (results.length > 0) {
+                    await Promise.all(results);
+                }
+
+                // 3. Reset database fields
+                const { error } = await supabase
+                    .from('applicant_pool')
+                    .update({ 
+                        status: 'applied',
+                        rejection_reason: null,
+                        phone_number: null,
+                        pledge_accepted: false,
+                        privacy_accepted: false,
+                        student_signature: null,
+                        parent_signature: null,
+                        pledged_at: null
+                    })
+                    .eq('id', applicant.id);
+
+                if (error) throw error;
+            } else {
+                // Normal status update (pending, approved, rejected)
+                const { error } = await supabase
+                    .from('applicant_pool')
+                    .update({ status, rejection_reason: reason, role })
+                    .eq('id', applicant.id);
+
+                if (error) throw error;
+            }
+
             fetchApplicants();
             setSelectedApplicant(null);
             setRejectionReason('');
+        } catch (err) {
+            alert('작업 실패: ' + (err.message || '알 수 없는 오류'));
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const filteredApplicants = applicants
@@ -218,22 +272,24 @@ const StudentManagement = () => {
                     <tbody>
                         {filteredApplicants.map((applicant) => (
                             <tr key={applicant.id} className="hover:bg-gray-50 transition-colors group">
-                                <td className="px-6 py-4 text-xs font-mono font-black text-ios-indigo">{applicant.student_id}</td>
-                                <td className="px-6 py-4 text-xs font-bold text-[#1C1C1E]">{applicant.name}</td>
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 align-middle text-xs font-mono font-black text-ios-indigo">{applicant.student_id}</td>
+                                <td className="px-6 py-4 align-middle text-xs font-bold text-[#1C1C1E]">{applicant.name}</td>
+                                <td className="px-6 py-4 align-middle">
                                     <span className="text-[10px] font-black text-ios-gray uppercase tracking-widest">
                                         Student
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 text-xs font-medium text-ios-gray flex items-center gap-1.5">
-                                    {applicant.phone_number ? (
-                                        <>
-                                            <Phone className="w-3 h-3 text-ios-emerald" />
-                                            {applicant.phone_number}
-                                        </>
-                                    ) : '-'}
+                                <td className="px-6 py-4 align-middle">
+                                    <div className="flex items-center gap-1.5 text-xs font-medium text-ios-gray">
+                                        {applicant.phone_number ? (
+                                            <>
+                                                <Phone className="w-3 h-3 text-ios-emerald" />
+                                                {applicant.phone_number}
+                                            </>
+                                        ) : '-'}
+                                    </div>
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 align-middle">
                                     {applicant.pledge_accepted ? (
                                         <div className="flex flex-col gap-0.5">
                                             <span className="flex items-center gap-1 text-[10px] font-black text-ios-indigo">
@@ -247,7 +303,7 @@ const StudentManagement = () => {
                                         <span className="text-[10px] font-black text-ios-gray opacity-30">미작성</span>
                                     )}
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 align-middle">
                                     {applicant.status === 'applied' ? (
                                         <span className="px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-gray-100 text-ios-gray">
                                             신청 전
@@ -257,10 +313,10 @@ const StudentManagement = () => {
                                             value={applicant.status}
                                             onChange={(e) => handleApproval(applicant, e.target.value)}
                                             className={`px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border-none focus:ring-1 transition-all cursor-pointer ${
-                                                applicant.status === 'approved' ? 'bg-ios-emerald/10 text-ios-emerald focus:ring-ios-emerald' :
-                                                applicant.status === 'pending' ? 'bg-ios-amber/10 text-ios-amber focus:ring-ios-amber' :
-                                                applicant.status === 'rejected' ? 'bg-ios-rose/10 text-ios-rose focus:ring-ios-rose' :
-                                                'bg-gray-100 text-ios-gray focus:ring-gray-300'
+                                                applicant.status === 'approved' ? 'bg-[#ECFDF5] text-[#065F46] focus:ring-emerald-500/20' :
+                                                applicant.status === 'pending' ? 'bg-[#FFFBEB] text-[#92400E] focus:ring-amber-500/20' :
+                                                applicant.status === 'rejected' ? 'bg-[#FFF1F2] text-[#9F1239] focus:ring-rose-500/20' :
+                                                'bg-[#F3F4F6] text-[#4B5563] focus:ring-gray-300/20'
                                             }`}
                                         >
                                             <option value="pending">승인 대기</option>
@@ -270,7 +326,7 @@ const StudentManagement = () => {
                                         </select>
                                     )}
                                 </td>
-                                <td className="px-6 py-4 text-right">
+                                <td className="px-6 py-4 align-middle text-right">
                                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         {applicant.status === 'pending' && (
                                             <>

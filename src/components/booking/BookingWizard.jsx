@@ -40,7 +40,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [authUser, setAuthUser] = useState(null); // The actual logged-in user
-  const [opData, setOpData] = useState({ quarters: [], defaults: [], exceptions: [] });
+  const [opData, setOpData] = useState({ quarters: [], exceptions: [], operatingRules: [] });
   const [userDayBookings, setUserDayBookings] = useState([]);
   const [seatDayBookings, setSeatDayBookings] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -76,18 +76,27 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
 
       if (effectiveZoneId) {
         setLoading(true);
-        const [sData, qData, dData, eData] = await Promise.all([
+        const [sData, qData, dData, eData, configData] = await Promise.all([
           supabase.from('sessions').select('*').eq('zone_id', effectiveZoneId).order('start_time', { ascending: true }),
           supabase.from('operation_quarters').select('*'),
           supabase.from('operation_defaults').select('*').eq('zone_id', effectiveZoneId),
-          supabase.from('operation_exceptions').select('*').eq('zone_id', effectiveZoneId)
+          supabase.from('operation_exceptions').select('*').eq('zone_id', effectiveZoneId),
+          supabase.from('configs').select('*').eq('key', `zone_op_config_${effectiveZoneId}`).single()
         ]);
 
         if (sData.data) setSessions(sData.data);
+        
+        // Fetch operating rules from session_operating_days
+        const { data: rulesData } = await supabase
+          .from('session_operating_days')
+          .select('session_id, day_of_week')
+          .in('session_id', (sData.data || []).map(s => s.id))
+          .eq('is_active', true);
+
         setOpData({
           quarters: qData.data || [],
-          defaults: dData.data || [],
-          exceptions: eData.data || []
+          exceptions: eData.data || [],
+          operatingRules: rulesData || []
         });
 
         setLoading(false);
@@ -156,10 +165,9 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
     const exception = opData.exceptions.find(e => e.exception_date === d);
     if (exception) return { ok: false, msg: `휴무일: ${exception.reason}` };
 
-    if (opData.defaults.length > 0) {
+    if (opData.operatingRules.length > 0) {
       const dayOfWeek = targetDate.getDay();
-      const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
-      const hasAnyPeriod = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
+      const hasAnyPeriod = opData.operatingRules.some(r => r.day_of_week === dayOfWeek);
       if (!hasAnyPeriod) return { ok: false, msg: '해당 요일은 운영하지 않습니다.' };
     }
 
@@ -467,12 +475,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
           <div className="grid grid-cols-1 gap-3">
             {sessions.map(s => {
                 const dayOfWeek = parseISO(date).getDay();
-                const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
-                const isOp = 
-                    s.id === 1 ? dayDefault?.morning :
-                    s.id === 2 ? dayDefault?.dinner :
-                    s.id === 3 ? dayDefault?.period1 :
-                    s.id === 4 ? dayDefault?.period2 : false;
+                const isOp = opData.operatingRules.some(r => r.session_id === s.id && r.day_of_week === dayOfWeek);
                 
                 const isAlreadyBooked = userDayBookings.some(b => b.session_id === s.id);
                 const isSeatTaken = seatDayBookings.some(b => b.session_id === s.id);

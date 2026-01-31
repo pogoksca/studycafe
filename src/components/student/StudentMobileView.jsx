@@ -178,13 +178,13 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
              <div className="absolute bottom-0 left-0 w-64 h-64 bg-ios-blue/5 blur-3xl -z-10" />
 
              {/* 0. Today's Learning Dashboard */}
-             <div className="flex-[2] bg-white rounded-[2rem] border border-gray-100 shadow-sm p-6 relative overflow-hidden flex flex-col">
+             <div className="flex-[2] glass-card p-7 relative overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                         <div className="w-8 h-8 rounded-full bg-ios-amber/10 flex items-center justify-center">
                              <BookOpen className="w-4 h-4 text-ios-amber" />
                         </div>
-                        <h2 className="text-lg font-black text-[#1C1C1E]">오늘의 학습</h2>
+                        <h2 className="text-lg font-black text-[#1C1C1E] tracking-tight">오늘의 학습</h2>
                     </div>
                     <span className="text-[10px] font-bold text-ios-gray bg-gray-50 px-3 py-1.5 rounded-full border border-gray-100 max-sm:hidden">
                         {format(new Date(), 'M월 d일')} 현황
@@ -207,17 +207,17 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                 </div>
 
                 {/* Weekly Status */}
-                <div className="bg-gray-50/50 rounded-2xl p-4 border border-gray-100/50 mt-auto relative">
+                <div className="bg-gray-200/20 rounded-apple-md p-4 border border-white/40 mt-auto relative backdrop-blur-xl">
                     {/* Navigation Arrows */}
                     <button 
                         onClick={handlePrevWeek}
-                        className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-[#1C1C1E] transition-colors"
+                        className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap"
                     >
                         <ChevronLeft className="w-5 h-5" />
                     </button>
                     <button 
                         onClick={handleNextWeek}
-                        className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-[#1C1C1E] transition-colors"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap"
                     >
                         <ChevronRight className="w-5 h-5" />
                     </button>
@@ -237,7 +237,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                                     <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${
                                         isCur 
                                         ? 'bg-[#1C1C1E] text-white shadow-lg ring-4 ring-white z-10' 
-                                        : 'bg-white border border-gray-100 text-gray-300'
+                                        : 'bg-white/50 border border-white/40 text-gray-300'
                                     }`}>
                                         {format(day, 'd')}
                                     </div>
@@ -260,7 +260,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
              {/* 1. Booking Button */}
              <button 
                onClick={() => setActiveTab('map')}
-               className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
+               className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
              >
                <div className="absolute inset-0 bg-gradient-to-br from-ios-indigo/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                <div className="w-14 h-14 rounded-full bg-ios-indigo/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
@@ -276,7 +276,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
             {/* 2. Attendance Button */}
              <button 
                onClick={() => setActiveTab('attendance')}
-               className="flex-1 bg-white rounded-3xl border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
+               className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
              >
                <div className="absolute inset-0 bg-gradient-to-br from-ios-emerald/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                <div className="w-14 h-14 rounded-full bg-ios-emerald/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
@@ -303,8 +303,10 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
         );
       case 'attendance':
         return (
-            <div className="flex-1 bg-white p-6 flex flex-col items-center justify-center">
-                <AttendanceCheck user={currentUser} />
+            <div className="flex-1 bg-white flex flex-col items-center justify-center overflow-y-auto scrollbar-hide px-6">
+                <div className="w-full max-w-lg py-8 flex flex-col items-center justify-center">
+                    <AttendanceCheck user={currentUser} />
+                </div>
             </div>
         );
       case 'profile':
@@ -321,33 +323,18 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
   return (
     <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
       {/* Header */}
-      <header className="flex-none bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-5 py-3 flex items-center justify-between z-50 sticky top-0 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-3">
-           <div className="w-10 h-10 rounded-[10px] bg-[#1C1C1E] flex items-center justify-center shadow-sm">
-             <Layout className="w-5 h-5 text-white" />
-           </div>
-           <div>
-             <h1 className="text-[17px] font-black text-[#1C1C1E] tracking-tighter leading-tight uppercase">
-                {schoolName.split(' ')[0]}
-             </h1>
-             <p className="text-[9px] font-black tracking-[0.2em] text-ios-indigo uppercase opacity-80 leading-none mt-0.5">
-                {schoolName.split(' ').slice(1).join(' ') || 'STUDY CAFE'}
-             </p>
-           </div>
+      <header className="flex-none glass-header px-6 pt-10 pb-4 flex items-center justify-between shadow-sm z-50">
+        <div className="flex flex-col">
+            <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{schoolName.split(' ')[0]}</h1>
+            <p className="text-[10px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70">Study Cafe Manager</p>
         </div>
 
-        <div className="flex items-center gap-3">
-            <div className="text-right">
-                <p className="text-[11px] font-black text-[#1C1C1E]">{currentUser?.full_name}</p>
-                <p className="text-[10px] font-black text-ios-gray leading-none mt-0.5">
-                    {format(new Date(), 'yyyy년 M월 d일 (EEE)', { locale: ko })}
-                </p>
-            </div>
+        <div className="flex items-center gap-4">
             <button 
               onClick={onLogout}
-              className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-ios-gray hover:text-black active:scale-95 transition-all border border-gray-100/50"
+              className="p-3 bg-gray-200/20 text-ios-gray hover:text-ios-rose hover:bg-ios-rose/10 rounded-apple-md transition-all ios-tap border border-white/40 backdrop-blur-xl"
             >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-5 h-5" />
             </button>
         </div>
       </header>
@@ -360,7 +347,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
       {/* Bottom Navigation */}
       {/* Hide bottom nav when in wizard logic if needed, but keeping it allows quick exit */}
       {activeTab !== 'map' && (
-      <nav className="flex-none bg-white border-t border-gray-200/50 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 px-6 flex justify-between items-center z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+      <nav className="flex-none glass-material pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 px-6 flex justify-between items-center z-50 shadow-[0_-4px_40px_rgba(0,0,0,0.03)] border-t border-white/40">
         {[
           { id: 'home', icon: Home, label: '홈' },
           { id: 'map', icon: Map, label: '예약' },
@@ -370,15 +357,16 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
           <button
             key={item.id}
             onClick={() => setActiveTab(item.id)}
-            className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-300 w-16 group ${
+            className={`flex flex-col items-center justify-center p-2 rounded-apple-md transition-all duration-300 w-16 group ios-tap ${
               activeTab === item.id 
                 ? 'text-[#1C1C1E]' 
                 : 'text-gray-300 hover:text-gray-500'
             }`}
           >
             <div className={`relative transition-transform duration-300`}>
-                <item.icon className={`w-7 h-7 stroke-[2.5px] ${activeTab === item.id ? 'fill-current' : 'fill-transparent'}`} />
+                <item.icon className={`w-7 h-7 stroke-[2.5px] ${activeTab === item.id ? 'fill-ios-indigo/10' : 'fill-transparent'}`} />
             </div>
+            <span className="text-[9px] font-black mt-1">{item.label}</span>
           </button>
         ))}
       </nav>

@@ -13,7 +13,7 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
   const [loading, setLoading] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [sessions, setSessions] = useState([]);
-  const [opData, setOpData] = useState({ quarters: [], defaults: [], exceptions: [] });
+  const [opData, setOpData] = useState({ quarters: [], exceptions: [], operatingRules: [] });
 
   useEffect(() => {
     fetchInitialData();
@@ -39,29 +39,31 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
 
     const init = async () => {
       // 1. Fetch operating data
-      const [qData, dData, eData] = await Promise.all([
+      const [qData, eData, sData] = await Promise.all([
         supabase.from('operation_quarters').select('*'),
-        supabase.from('operation_defaults').select('*').eq('zone_id', selectedZoneId),
-        supabase.from('operation_exceptions').select('*').eq('zone_id', selectedZoneId)
+        supabase.from('operation_exceptions').select('*').eq('zone_id', selectedZoneId),
+        supabase.from('sessions').select('*').eq('zone_id', selectedZoneId).order('start_time', { ascending: true })
       ]);
 
       if (isMounted) {
+        // Fetch operating rules from session_operating_days
+        const { data: rulesData } = await supabase
+          .from('session_operating_days')
+          .select('session_id, day_of_week')
+          .in('session_id', (sData.data || []).map(s => s.id))
+          .eq('is_active', true);
+
         setOpData({
           quarters: qData.data || [],
-          defaults: dData.data || [],
-          exceptions: eData.data || []
+          exceptions: eData.data || [],
+          operatingRules: rulesData || []
         });
       }
 
       // 2. Load sessions for zone
-      const { data: sess } = await supabase
-        .from('sessions')
-        .select('*')
-        .eq('zone_id', selectedZoneId)
-        .order('start_time', { ascending: true });
-      
+      const sess = sData.data || [];
       if (!isMounted) return;
-      setSessions(sess || []);
+      setSessions(sess);
 
       // 3. Setup Canvas (DOM Isolation Pattern)
       if (!containerRef.current) return;
@@ -182,10 +184,10 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     const exception = opData.exceptions.find(e => e.exception_date === dStr);
     if (exception) return false;
 
-    // 3. Check Defaults (At least one period active)
+    // 3. Check Operating Rules (At least one period active)
     const dayOfWeek = targetDate.getDay();
-    const dayDefault = opData.defaults.find(def => def.day_of_week === dayOfWeek);
-    const hasAnyPeriod = dayDefault && (dayDefault.morning || dayDefault.dinner || dayDefault.period1 || dayDefault.period2);
+    const hasAnyPeriod = opData.operatingRules.some(r => r.day_of_week === dayOfWeek);
+    
     if (!hasAnyPeriod) return false;
 
     return true;
@@ -290,19 +292,19 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     // 0. Handle Structural Elements (Walls, Doors, etc.)
     if (seatData.type === 'structure') {
       const rect = new fabric.Rect({
-        fill: '#E5E5EA',
+        fill: seatData.bg_color || '#E5E5EA',
         width: seatData.width || 72,
         height: seatData.height || 72,
-        rx: 6, ry: 6,
-        stroke: '#D1D1D6',
+        rx: 12, ry: 12,
+        stroke: seatData.stroke_color || '#D1D1D6',
         strokeWidth: 1,
       });
 
       const text = new fabric.IText(seatData.label || '', {
-        fontSize: 10,
+        fontSize: seatData.font_size || 10,
         originX: 'center', originY: 'center',
         left: (seatData.width || 72) / 2, top: (seatData.height || 72) / 2,
-        fill: '#AEAEB2',
+        fill: seatData.text_color || '#AEAEB2',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", Inter', fontWeight: 'bold',
         selectable: false,
       });
@@ -310,6 +312,8 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       const group = new fabric.Group([rect, text], {
         left: seatData.pos_x,
         top: seatData.pos_y,
+        originX: 'left',
+        originY: 'top',
         angle: seatData.rotation,
         selectable: false,
         evented: false, 
@@ -335,10 +339,10 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     const baseColor = seatData.zone_color || '#5E5CE6';
     const bg = new fabric.Rect({
       fill: baseColor,
-      opacity: isActiveNow ? 0.8 : (hasAnyBooking ? 0.1 : 0.02), // Ultra-faint for empty seats
+      opacity: isActiveNow ? 0.8 : (hasAnyBooking ? 0.12 : 0.03), 
       width: 72, 
       height: 72,
-      rx: 6, ry: 6,
+      rx: 12, ry: 12,
       strokeWidth: 0,
       left: 0, top: 0,
       originX: 'left', originY: 'top',
@@ -346,9 +350,10 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     });
 
     // 2. Seat Number Header Area 
-    const headerBg = new fabric.Path('M 0 6 Q 0 0 6 0 L 66 0 Q 72 0 72 6 L 72 18 L 0 18 z', {
+    const headerBgResource = `M 0 12 Q 0 0 12 0 L 60 0 Q 72 0 72 12 L 72 18 L 0 18 z`;
+    const headerBg = new fabric.Path(headerBgResource, {
       fill: baseColor,
-      opacity: isActiveNow ? 1 : (hasAnyBooking ? 0.4 : 0.15),
+      opacity: isActiveNow ? 1 : (hasAnyBooking ? 0.45 : 0.18),
       strokeWidth: 0,
       left: 0, top: 0,
       originX: 'left', originY: 'top',
@@ -369,7 +374,17 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       'Morning': '아침',
       'Dinner': '석식',
       '1st Period': '1 차',
-      '2nd Period': '2 차'
+      '2nd Period': '2 차',
+      'period1': '1 차',
+      'period2': '2 차'
+    };
+    
+    const getCompactName = (name) => {
+        if (prefixMap[name]) return prefixMap[name];
+        // If it's a number/period like '3차시', take '3 차'
+        const match = name.match(/(\d+)/);
+        if (match) return `${match[1]} 차`;
+        return name.substring(0,2);
     };
     
     const sortedSessions = [...(sessList || [])].sort((a,b) => a.id - b.id);
@@ -384,14 +399,14 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
 
       const generateColText = (sessions) => sessions.map(sess => {
           const booking = seatBookings.find(b => b.session_id === sess.id);
-          const prefix = prefixMap[sess.name] || sess.name.substring(0,2);
+          const prefix = getCompactName(sess.name);
           
           if (!booking) return `${prefix}:`;
           if (canSeeDetails(booking)) {
              return `${prefix}:${booking.profiles.full_name.substring(0,4)}`; 
-          } else {
-             return `${prefix}:예약됨`;
-          }
+           } else {
+              return `${prefix}:(예약완료)`;
+           }
       }).join('\n');
 
       const leftText = new fabric.Text(generateColText(leftSessions), {
@@ -418,7 +433,7 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     } else {
       sortedSessions.forEach((sess, idx) => {
          const booking = seatBookings.find(b => b.session_id === sess.id);
-         const prefix = prefixMap[sess.name] || sess.name.substring(0,2);
+         const prefix = getCompactName(sess.name);
          
          const yPos = 21 + (idx * 13);
          
@@ -449,7 +464,7 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
                const name = booking.profiles.full_name || '';
                info = studentId ? `${studentId} ${name}` : name;
             } else {
-               info = `예약됨`;
+               info = `(예약완료)`;
             }
          }
 
@@ -477,13 +492,13 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       });
     }
 
-     const selectionBorder = new fabric.Rect({
-       width: 74, height: 74,
-       rx: 8, ry: 8,
+      const selectionBorder = new fabric.Rect({
+        width: 76, height: 76,
+        rx: 14, ry: 14,
        fill: 'transparent',
-       stroke: baseColor,
-       strokeWidth: 0,
-       left: -2, top: -2,
+        stroke: baseColor,
+        strokeWidth: 0,
+        left: -2, top: -2,
        originX: 'left', originY: 'top',
        selectable: false,
        name: 'selectionBorder',
@@ -508,13 +523,13 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       {/* Zone Selection Header - Hidden in Minimal Mode */}
       {!minimal && (
       <div className="flex items-center gap-4 px-1">
-        <div className="flex gap-[10px] m-[10px] mb-0 border-none shrink-0">
+      <div className="flex gap-[10px] m-[10px] mb-0 border-none shrink-0 p-1 bg-gray-200/20 rounded-apple-md backdrop-blur-xl border border-white/40">
           {zones.map(z => (
             <button
               key={z.id}
               onClick={() => onZoneChange(z.id)}
-              className={`px-6 py-2 rounded-lg text-xs font-black transition-all ios-tap border-none outline-none ring-0 ${
-                selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
+              className={`px-6 py-2 rounded-apple-md text-xs font-black transition-all ios-tap border-none ${
+                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-white/40'
               }`}
             >
               {z.name}
@@ -527,18 +542,18 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
           <span className="text-[10px] font-bold">원하는 구역을 선택하고 좌석을 클릭해 주세요.</span>
         </div>
         
-        <div className="flex bg-gray-50 p-1 rounded-full border border-gray-100 items-center gap-1 ml-auto">
+        <div className="flex bg-gray-200/20 p-1 rounded-apple-md border border-white/40 backdrop-blur-xl items-center gap-1 ml-auto">
           <button 
             onClick={handlePrevOperatingDay}
-            className="p-1.5 hover:bg-white rounded-full transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
+            className="p-1.5 hover:bg-white rounded-apple-md transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           
-          <div className="relative group px-2 flex items-center gap-2 cursor-pointer">
-            <Calendar className="w-4 h-4 text-ios-indigo" />
-            <span className="text-[14px] font-black text-[#1C1C1E] whitespace-nowrap">
-              {format(parseISO(viewDate), 'yyyy-MM-dd (EEE)', { locale: ko })}
+          <div className="relative group px-3 flex items-center gap-2 cursor-pointer">
+            <Calendar className="w-3.5 h-3.5 text-ios-indigo" />
+            <span className="text-[13px] font-black text-[#1C1C1E] whitespace-nowrap">
+              {format(parseISO(viewDate), 'MM.dd (EEE)', { locale: ko })}
             </span>
             <input 
               type="date" 
@@ -550,7 +565,7 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
 
           <button 
             onClick={handleNextOperatingDay}
-            className="p-1.5 hover:bg-white rounded-full transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
+            className="p-1.5 hover:bg-white rounded-apple-md transition-all text-ios-gray hover:text-[#1C1C1E] ios-tap"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

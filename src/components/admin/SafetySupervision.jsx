@@ -142,7 +142,7 @@ const SafetySupervision = () => {
     
     const [currentUser, setCurrentUser] = useState(null);
     const [quarters, setQuarters] = useState([]);
-    const [defaults, setDefaults] = useState([]);
+    const [operatingRules, setOperatingRules] = useState([]);
     const [exceptions, setExceptions] = useState([]);
     
     // Derived academic year from currentMonth (Korean school standard: ends in February)
@@ -183,14 +183,22 @@ const SafetySupervision = () => {
     };
 
     const fetchInitialData = async () => {
-        const [q, d, e] = await Promise.all([
+        const [q, e, sData] = await Promise.all([
             supabase.from('operation_quarters').select('*').eq('academic_year', academicYear).order('quarter', { ascending: true }),
-            supabase.from('operation_defaults').select('*'),
-            supabase.from('operation_exceptions').select('*')
+            supabase.from('operation_exceptions').select('*'),
+            supabase.from('sessions').select('*').eq('zone_id', selectedZoneId).order('start_time', { ascending: true })
         ]);
         if (q.data) setQuarters(q.data);
-        if (d.data) setDefaults(d.data);
         if (e.data) setExceptions(e.data);
+        
+        // Fetch operating rules from session_operating_days
+        const { data: rulesData } = await supabase
+            .from('session_operating_days')
+            .select('session_id, day_of_week')
+            .in('session_id', (sData.data || []).map(s => s.id))
+            .eq('is_active', true);
+            
+        setOperatingRules(rulesData || []);
     };
 
 
@@ -343,7 +351,7 @@ const SafetySupervision = () => {
             return;
         }
 
-        setPrintData({ quarter, assignments: data || [], defaults, exceptions });
+        setPrintData({ quarter, assignments: data || [], operatingRules, exceptions });
         setPrintModal(false);
         setLoading(false);
 
@@ -450,9 +458,13 @@ const SafetySupervision = () => {
                             end: parseISO(q.end_date) 
                         })
                     );
-                    const dayDefault = defaults.find(d => d.day_of_week === dayOfWeek);
-                    const isOperatingDay = quarter && !exception && (dayDefault?.morning || dayDefault?.dinner || dayDefault?.period1 || dayDefault?.period2);
-                    const isShortDay = dayDefault && !dayDefault.period1 && !dayDefault.period2;
+
+                    const dayOperatingRules = operatingRules.filter(r => r.day_of_week === dayOfWeek);
+                    const isOperatingDay = quarter && !exception && (dayOperatingRules.length > 0);
+                    // Determine if short day (no period 1 or period 2)
+                    // We need session metadata for this, but as a heuristic:
+                    const isShortDay = dayOperatingRules.length <= 2;
+
                     const maxSlots = isOperatingDay ? (isShortDay ? 1 : 2) : 0;
 
                     const isAdmin = currentUser?.profile?.role === 'admin';
@@ -804,13 +816,12 @@ const SafetySupervision = () => {
                                                             const sup1 = dayAssignments[0];
                                                             const sup2 = dayAssignments[1];
 
-                                                            const dayDefault = printData.defaults.find(d => d.day_of_week === date.getDay());
                                                             const exception = printData.exceptions.find(e => e.exception_date === dateStr);
                                                             const isWithinRange = isWithinInterval(date, { 
                                                                 start: parseISO(printData.quarter.start_date), 
                                                                 end: parseISO(printData.quarter.end_date) 
                                                             });
-                                                            const isOperatingDay = isWithinRange && !exception && (dayDefault?.morning || dayDefault?.dinner || dayDefault?.period1 || dayDefault?.period2);
+                                                            const isOperatingDay = isWithinRange && !exception && printData.operatingRules.some(r => r.day_of_week === date.getDay());
 
                                                             return (
                                                                 <tr key={dIndex} className="h-[7mm] text-[7pt] text-black">

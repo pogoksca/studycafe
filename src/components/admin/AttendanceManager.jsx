@@ -384,7 +384,7 @@ const AttendanceManager = ({
         fill: '#E5E5EA',
         width: seatData.width || 72,
         height: seatData.height || 72,
-        rx: 6, ry: 6,
+        rx: 12, ry: 12,
         stroke: '#D1D1D6',
         strokeWidth: 1,
       });
@@ -420,7 +420,7 @@ const AttendanceManager = ({
       fill: '#FFFFFF',
       width: 71, 
       height: 71,
-      rx: 6, ry: 6,
+      rx: 12, ry: 12,
       stroke: '#E5E5EA',
       strokeWidth: 1,
       left: 0.5, top: 0.5,
@@ -429,7 +429,8 @@ const AttendanceManager = ({
     });
 
     // 2. Seat Number Header Area (Roof)
-    const headerBg = new fabric.Path('M 0 6 Q 0 0 6 0 L 66 0 Q 72 0 72 6 L 72 18 L 0 18 z', {
+    const roofPath = `M 0 12 Q 0 0 12 0 L 60 0 Q 72 0 72 12 L 72 18 L 0 18 z`;
+    const headerBg = new fabric.Path(roofPath, {
       fill: baseColor,
       strokeWidth: 0,
       left: 0, top: 0,
@@ -562,7 +563,7 @@ const AttendanceManager = ({
             selectable: false,
         });
         
-        const footerPath = 'M 0 50 L 72 50 L 72 66 Q 72 72 66 72 L 6 72 Q 0 72 0 66 Z';
+        const footerPath = `M 0 50 L 72 50 L 72 60 Q 72 72 60 72 L 12 72 Q 0 72 0 60 Z`;
         const footerBg = new fabric.Path(footerPath, {
             fill: '#F2F2F7',
             opacity: 0.3,
@@ -701,13 +702,13 @@ const AttendanceManager = ({
           <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between px-2">
             <div className="flex items-center gap-4 ml-[10px] mt-[10px]">
               {/* Zone Selection */}
-              <div className="flex gap-[10px]">
+              <div className="flex gap-[10px] p-1 bg-gray-200/20 rounded-apple-md border border-white/40">
                 {zones.map(z => (
                   <button
                     key={z.id}
                     onClick={() => setSelectedZoneId(z.id)}
-                    className={`h-8 px-4 rounded-[8px] text-[11px] font-black transition-all ios-tap flex items-center justify-center border-none outline-none ring-0 ${
-                      selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-gray-100 text-ios-gray hover:bg-gray-200'
+                    className={`h-7 px-4 rounded-apple-md text-[11px] font-black transition-all ios-tap flex items-center justify-center border-none ${
+                      selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-white/40'
                     }`}
                   >
                     {z.name}
@@ -715,33 +716,34 @@ const AttendanceManager = ({
                 ))}
               </div>
 
-              {/* Date Selection - NEW */}
-              <div className="flex items-center bg-gray-100 p-0.5 rounded-[8px] border border-gray-200 h-8">
+
+               {/* Date Selection */}
+              <div className="flex items-center bg-gray-200/20 p-1 rounded-apple-md border border-white/40 backdrop-blur-xl h-9">
                  <button 
                     onClick={() => changeDate(-1)}
-                    className="h-7 px-2.5 rounded-[6px] hover:bg-white text-ios-gray transition-all text-[12px] flex items-center justify-center"
+                    className="h-7 px-2.5 rounded-apple-md hover:bg-white text-ios-gray hover:text-[#1C1C1E] transition-all text-[11px] font-black"
                  >
                     &lt;
                  </button>
-                 <span className="h-7 px-3 text-[11px] font-black min-w-[90px] text-center flex items-center justify-center">
-                    {selectedDate} ({['일', '월', '화', '수', '목', '금', '토'][new Date(selectedDate).getDay()]})
+                 <span className="px-3 text-[12px] font-black min-w-[100px] text-center text-[#1C1C1E]">
+                    {selectedDate.substring(5)} ({['일', '월', '화', '수', '목', '금', '토'][new Date(selectedDate).getDay()]})
                  </span>
                  <button 
                     onClick={() => changeDate(1)}
-                    className="h-7 px-2.5 rounded-[6px] hover:bg-white text-ios-gray transition-all text-[12px] flex items-center justify-center"
+                    className="h-7 px-2.5 rounded-apple-md hover:bg-white text-ios-gray hover:text-[#1C1C1E] transition-all text-[11px] font-black"
                  >
                     &gt;
                  </button>
               </div>
 
               {/* Session Selection */}
-              <div className="flex bg-gray-100 pt-[3px] pb-[4px] px-0.5 rounded-[8px] border border-gray-200 h-8">
+              <div className="flex bg-gray-200/20 p-1 rounded-apple-md border border-white/40 h-9 box-border">
                 {sessions.map(s => (
                   <button
                     key={s.id}
                     onClick={() => setActiveSession(s.id)}
-                    className={`h-[25px] px-5 rounded-[6px] text-[10px] font-black transition-all duration-300 ios-tap flex items-center justify-center ${
-                      activeSession === s.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-gray-200/50'
+                    className={`h-7 px-5 rounded-apple-md text-[10.5px] font-black transition-all duration-300 ios-tap flex items-center justify-center ${
+                      activeSession === s.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-white/40'
                     }`}
                   >
                     {s.name.toUpperCase()}
@@ -764,20 +766,20 @@ const AttendanceManager = ({
           </div>
           
           {/* Attendance Stats Badges - RELOCATED TO NEW ROW */}
-          <div className="flex items-center gap-2 px-2 ml-[10px]">
-            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-[8px]">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span className="text-[10px] font-black text-emerald-700">출석 {stats.present}</span>
+           <div className="flex items-center gap-2 px-2 ml-[10px] mt-2">
+            <div className="flex items-center gap-1.5 bg-white shadow-sm border border-gray-100 px-4 py-2 rounded-apple-md">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
+              <span className="text-[10px] font-black text-[#1C1C1E]">출석 <span className="text-emerald-500">{stats.present}</span></span>
             </div>
-            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-100 px-3 py-1.5 rounded-[8px]">
-              <div className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-              <span className="text-[10px] font-black text-rose-700">결석 {stats.absent}</span>
+            <div className="flex items-center gap-1.5 bg-white shadow-sm border border-gray-100 px-4 py-2 rounded-apple-md">
+              <div className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-sm shadow-rose-500/30" />
+              <span className="text-[10px] font-black text-[#1C1C1E]">결석 <span className="text-rose-500">{stats.absent}</span></span>
             </div>
-            <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-100 px-3 py-1.5 rounded-[8px]">
-                <Users className="w-3 h-3 text-ios-gray" />
+            <div className="flex items-center gap-1.5 bg-white shadow-sm border border-gray-100 px-4 py-2 rounded-apple-md">
+                <Users className="w-3.5 h-3.5 text-ios-gray opacity-60" />
                 <span className="text-[10px] font-black text-ios-gray">전체 {stats.total}</span>
             </div>
-            <div className="flex items-center gap-1.5 bg-ios-indigo/5 border border-ios-indigo/10 px-3 py-1.5 rounded-[8px]">
+            <div className="flex items-center gap-1.5 bg-white shadow-sm border border-gray-100 px-4 py-2 rounded-apple-md">
                 <span className="text-[10px] font-black text-ios-indigo">출석률 {stats.rate}%</span>
             </div>
           </div>

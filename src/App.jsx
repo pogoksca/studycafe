@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Layout, Calendar, User, Settings, LogOut, Search, MapPin, ShieldCheck, Map, Users, RefreshCw, Printer } from 'lucide-react'
+import { Layout, Calendar, User, Settings, LogOut, Search, MapPin, ShieldCheck, Map, Users, RefreshCw, Printer, Box } from 'lucide-react'
 import FloorPlanEditor from './components/admin/FloorPlanEditor'
 import AttendanceManager from './components/admin/AttendanceManager'
 import SafetySupervision from './components/admin/SafetySupervision'
@@ -15,6 +15,7 @@ import ParentMobileView from './components/parent/ParentMobileView'
 import OperationManager from './components/admin/OperationManager'
 import SystemSettings from './components/admin/SystemSettings'
 import AttendancePrint from './components/admin/AttendancePrint'
+import ZoneManagement from './components/admin/ZoneManagement'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
@@ -189,6 +190,7 @@ function App() {
     {
       group: '공간 및 자원 관리',
       items: [
+        { id: 'zones', label: '학습 공간 관리', icon: Box, roles: ['admin'] },
         { id: 'layout', label: '공간 배치 편집', icon: Map, roles: ['admin'] },
         { id: 'students', label: '학생 명단 관리', icon: Users, roles: ['admin'] },
         { id: 'schedule', label: '운영 일정 설정', icon: Calendar, roles: ['admin'] },
@@ -197,7 +199,7 @@ function App() {
     {
       group: '시스템 설정',
       items: [
-        { id: 'settings', label: '공간 및 환경 설정', icon: Settings, roles: ['admin'] },
+        { id: 'settings', label: '환경 설정', icon: Settings, roles: ['admin'] },
       ]
     }
   ].map(group => ({
@@ -222,37 +224,34 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen bg-[#F2F2F7] text-[#1C1C1E] overflow-hidden font-sans selection:bg-ios-indigo/10">
-      {/* Top Header */}
-      <header className="bg-white border-b border-gray-200/60 px-4 py-2 lg:px-8 flex items-center justify-between z-40 shrink-0 shadow-sm">
+      {/* Top Header - Unified Glass Material */}
+      <header className="glass-header px-4 py-2.5 lg:px-8 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-6">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-[6px] bg-[#1C1C1E] flex items-center justify-center shadow-lg shadow-black/10">
+          {/* Logo - Refined Branding */}
+          <div className="flex items-center gap-3 group cursor-default">
+            <div className="w-9 h-9 rounded-apple-md bg-[#1C1C1E] flex items-center justify-center shadow-lg shadow-black/5 group-hover:scale-105 transition-transform">
               <Layout className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-tighter leading-tight uppercase text-[#1C1C1E]">{schoolName.split(' ')[0]}</h1>
-              <p className="text-[8px] font-black tracking-[0.2em] text-ios-indigo uppercase opacity-80">{schoolName.split(' ').slice(1).join(' ') || 'Study Cafe'}</p>
+              <h1 className="text-lg font-black tracking-tighter leading-none text-[#1C1C1E]">{schoolName.split(' ')[0]}</h1>
+              <p className="text-[9px] font-black text-ios-indigo tracking-widest uppercase opacity-60 mt-1">{schoolName.split(' ').slice(1).join(' ') || 'Study Cafe'}</p>
             </div>
           </div>
 
-          {/* Navigation Tabs - Horizontal */}
-          <nav className="flex items-center gap-1 bg-gray-50/80 p-1 rounded-[10px] border border-gray-100 ml-4 backdrop-blur-md">
+          {/* Navigation Tabs - Glass Control Group */}
+          <nav className="flex items-center gap-1 bg-gray-200/20 backdrop-blur-2xl p-1 rounded-apple-md border border-white/40 ml-4">
             {mainNavItems.map((item) => (
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-[8px] transition-all duration-300 group relative ${
+                className={`flex items-center gap-2 px-5 py-2 rounded-apple-md transition-all duration-300 ios-tap group relative ${
                   activeTab === item.id 
-                    ? 'bg-white shadow-md text-[#1C1C1E]' 
-                    : 'text-[#1C1C1E]/40 hover:text-[#1C1C1E] hover:bg-white/50'
+                    ? 'bg-white shadow-sm text-[#1C1C1E]' 
+                    : 'text-[#1C1C1E]/50 hover:text-[#1C1C1E] hover:bg-white/40'
                 }`}
               >
-                <item.icon className={`w-4 h-4 transition-transform duration-300 ${activeTab === item.id ? 'text-ios-indigo' : 'group-hover:scale-110'}`} />
+                <item.icon className={`w-4 h-4 transition-all duration-300 ${activeTab === item.id ? 'text-ios-indigo' : 'group-hover:scale-110'}`} />
                 <span className="font-black text-[13px]">{item.label}</span>
-                {activeTab === item.id && (
-                  <div className="absolute -bottom-[5px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-ios-indigo" />
-                )}
               </button>
             ))}
           </nav>
@@ -340,20 +339,20 @@ function App() {
           )}
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-gray-50/50 p-1 px-4 py-1.5 rounded-[10px] border border-gray-200/30">
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-white border border-gray-100 flex items-center justify-center shadow-sm">
+         <div className="flex items-center gap-7">
+          <div className="flex items-center gap-3 bg-gray-200/20 p-1 px-4 py-2 rounded-apple-md border border-white/40 backdrop-blur-lg">
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-white/50 border border-white flex items-center justify-center shadow-sm">
               <User className="w-4 h-4 text-ios-indigo" />
             </div>
             <div className="text-left">
-              <p className="text-[13px] font-black leading-none text-[#1C1C1E]">{currentUser?.full_name}</p>
+              <p className="text-[13px] font-black leading-none text-[#1C1C1E] uppercase">{currentUser?.full_name}</p>
               <p className="text-[9px] font-black text-ios-indigo tracking-widest mt-1 uppercase opacity-60 italic">{currentUser?.role}</p>
             </div>
           </div>
           
           <button 
             onClick={handleLogout}
-            className="flex items-center gap-2 p-2 px-4 rounded-[10px] text-ios-gray hover:text-ios-rose hover:bg-ios-rose/5 transition-all ios-tap border border-transparent hover:border-ios-rose/10 group"
+            className="flex items-center gap-2 p-2 px-5 rounded-apple-md text-ios-gray hover:text-ios-rose hover:bg-ios-rose/5 transition-all ios-tap border border-transparent hover:border-ios-rose/10 group"
           >
             <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             <span className="font-bold text-[13px]">로그아웃</span>
@@ -365,24 +364,24 @@ function App() {
       <main className="flex-1 h-full flex overflow-hidden relative">
         {activeTab === 'admin' ? (
           <div className="flex-1 flex overflow-hidden w-full">
-            {/* Staff Sidebar */}
-            <aside className="w-64 bg-white border-r border-gray-100 flex flex-col p-6 shrink-0 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-              <div className="flex-1 space-y-8">
+             {/* Staff Sidebar - Slim Glass Sidebar */}
+            <aside className="w-64 glass-material flex flex-col p-6 shrink-0 z-30 shadow-[4px_0_40px_rgba(0,0,0,0.02)] translate-x-0">
+              <div className="flex-1 space-y-9">
                 {staffMenuGroups.map((group, gIdx) => (
-                  <div key={gIdx} className="space-y-3">
-                    <h5 className="text-[10px] font-black text-ios-gray uppercase tracking-[0.2em] px-2">{group.group}</h5>
-                    <div className="space-y-1">
+                  <div key={gIdx} className="space-y-4">
+                    <h5 className="text-[10px] font-black text-ios-gray/60 uppercase tracking-[0.25em] px-3">{group.group}</h5>
+                    <div className="space-y-1.5">
                       {group.items.map((item) => (
                         <button
                           key={item.id}
                           onClick={() => setAdminSubTab(item.id)}
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ios-tap group ${
+                          className={`w-full flex items-center gap-3.5 px-3 py-3 rounded-apple-md text-[13.5px] font-bold transition-all ios-tap group ${
                             adminSubTab === item.id 
-                              ? 'bg-white text-[#1C1C1E] shadow-md border border-gray-100' 
-                              : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-gray-50'
+                              ? 'bg-white shadow-sm text-[#1C1C1E]' 
+                              : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-white/40'
                           }`}
                         >
-                          <item.icon className={`w-4 h-4 ${adminSubTab === item.id ? 'text-ios-indigo' : 'group-hover:text-ios-indigo transition-colors'}`} />
+                          <item.icon className={`w-4 h-4 ${adminSubTab === item.id ? 'text-ios-indigo' : 'text-ios-gray/50 group-hover:text-ios-indigo transition-colors'}`} />
                           {item.label}
                         </button>
                       ))}
@@ -400,7 +399,8 @@ function App() {
             {/* Admin Content View */}
             <div className="flex-1 bg-[#F2F2F7] p-6 overflow-hidden">
               <div className="h-full w-full rounded-2xl overflow-hidden shadow-sm border border-black/5 bg-white">
-                {adminSubTab === 'layout' ? <FloorPlanEditor /> : 
+                {adminSubTab === 'zones' ? <ZoneManagement /> :
+                 adminSubTab === 'layout' ? <FloorPlanEditor /> : 
                  adminSubTab === 'attendance' ? <AttendanceManager /> : 
                  adminSubTab === 'attendance_print' ? <AttendancePrint /> :
                  adminSubTab === 'students' ? <StudentManagement /> :
@@ -421,11 +421,11 @@ function App() {
                 <UserProfile />
               </div>
             ) : (
-              <div className="flex-1 flex flex-col overflow-hidden pt-2">
-                <section className="flex-1 flex flex-col xl:flex-row gap-6 leading-normal overflow-hidden">
+               <div className="flex-1 flex flex-col overflow-hidden pt-2">
+                <section className="flex-1 flex flex-col xl:flex-row gap-6 leading-normal overflow-hidden h-full">
                   {/* Map View */}
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="flex-1 w-full bg-white rounded-2xl border border-black/5 overflow-hidden p-2 shadow-sm">
+                  <div className="flex-1 flex flex-col overflow-hidden h-full">
+                    <div className="flex-1 w-full glass-card overflow-hidden p-2 shadow-sm h-full">
                       <SeatBookingMap 
                         onSelectSeat={setSelectedSeat} 
                         selectedProxyUser={selectedProxyUser}
@@ -438,7 +438,7 @@ function App() {
                   </div>
 
                   {/* Sidebar / Wizard */}
-                  <div className="xl:w-80 h-full overflow-y-auto scrollbar-hide bg-white rounded-2xl border border-black/5 shadow-sm">
+                  <div className="xl:w-[340px] h-full overflow-y-auto scrollbar-hide glass-card shadow-sm">
                     <BookingWizard 
                       selectedSeat={selectedSeat} 
                       onComplete={() => setSelectedSeat(null)} 

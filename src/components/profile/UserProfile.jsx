@@ -135,7 +135,7 @@ const UserProfile = ({ user }) => {
     <div className="flex flex-col gap-4 md:gap-6">
       {/* 1. Attendance Calendar (Top) */}
       <div className="animate-spring-up">
-        <div className="ios-glass rounded-ios p-10 border-white/5 shadow-inner-white">
+        <div className="bg-white rounded-[32px] p-10 border border-gray-100 shadow-sm">
           <div className="flex items-center justify-between mb-10">
             <h3 className="text-xl font-black flex items-center gap-3">
               <div className="w-10 h-10 rounded-ios bg-ios-indigo/20 flex items-center justify-center">
@@ -222,7 +222,7 @@ const UserProfile = ({ user }) => {
         {/* Left: Stats */}
         <div className="xl:col-span-2 flex flex-col gap-4 md:gap-6 animate-spring-up" style={{ animationDelay: '100ms' }}>
           <div className="grid grid-cols-2 gap-4 md:gap-6">
-             <div className="col-span-2 ios-glass rounded-ios p-8 flex flex-col items-center text-center gap-2 group hover:bg-white transition-all duration-500 ios-tap border border-transparent hover:border-gray-100 shadow-sm relative overflow-hidden">
+             <div className="col-span-2 bg-white rounded-[32px] p-8 flex flex-col items-center text-center gap-2 group transition-all duration-500 ios-tap border border-gray-100 shadow-sm relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-ios-amber/10 blur-3xl -z-10" />
                  <div className="w-16 h-16 rounded-ios bg-ios-amber/10 text-ios-amber flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform mb-2">
                    <Award className="w-8 h-8" />
@@ -234,7 +234,7 @@ const UserProfile = ({ user }) => {
                  </div>
              </div>
 
-             <div className="ios-glass rounded-ios p-8 flex flex-col items-center text-center gap-4 group hover:bg-white transition-all duration-500 ios-tap border border-transparent hover:border-gray-100 shadow-sm">
+             <div className="bg-white rounded-[32px] p-8 flex flex-col items-center text-center gap-4 group transition-all duration-500 ios-tap border border-gray-100 shadow-sm">
                  <div className="w-12 h-12 rounded-ios bg-ios-emerald/10 text-ios-emerald flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
                    <CheckCircle2 className="w-6 h-6" />
                  </div>
@@ -244,7 +244,7 @@ const UserProfile = ({ user }) => {
                  </div>
              </div>
 
-             <div className="ios-glass rounded-ios p-8 flex flex-col items-center text-center gap-4 group hover:bg-white transition-all duration-500 ios-tap border border-transparent hover:border-gray-100 shadow-sm">
+             <div className="bg-white rounded-[32px] p-8 flex flex-col items-center text-center gap-4 group transition-all duration-500 ios-tap border border-gray-100 shadow-sm">
                  <div className="w-12 h-12 rounded-ios bg-ios-rose/10 text-ios-rose flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
                    <AlertTriangle className="w-6 h-6" />
                  </div>
@@ -258,16 +258,16 @@ const UserProfile = ({ user }) => {
 
         {/* Right: Elite Member */}
         <div className="animate-spring-up" style={{ animationDelay: '200ms' }}>
-          <div className="bg-gradient-to-br from-ios-indigo via-[#7D7AFF] to-[#9B99FF] rounded-ios p-10 text-white shadow-2xl shadow-ios-indigo/30 relative overflow-hidden group ios-tap">
+          <div className="bg-gradient-to-br from-ios-indigo via-[#7D7AFF] to-[#9B99FF] rounded-[32px] p-10 text-white shadow-2xl shadow-ios-indigo/30 relative overflow-hidden group ios-tap">
              <div className="relative z-10">
-               <div className="w-14 h-14 rounded-ios bg-white/20 backdrop-blur-md flex items-center justify-center mb-6 shadow-inner-white">
+               <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mb-6 shadow-inner-white">
                  <Award className="w-8 h-8 text-white" />
                </div>
                <h4 className="text-2xl font-black tracking-tight mb-2">엘리트 멤버</h4>
                <p className="text-[15px] text-white/80 font-medium mb-8 leading-relaxed">상위 5% 학습 달성자입니다.<br/>명예의 전당 배지가 활성화되었습니다.</p>
                <button 
                   onClick={() => setShowLeaderboard(true)}
-                  className="w-full py-4 bg-black hover:bg-gray-900 rounded-ios text-xs font-black uppercase tracking-widest transition-all backdrop-blur-sm border border-white/10"
+                  className="w-full py-4 bg-black hover:bg-gray-900 rounded-2xl text-xs font-black uppercase tracking-widest transition-all backdrop-blur-sm border border-white/10"
                >
                   순위표 보기
                </button>
