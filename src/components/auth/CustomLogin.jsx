@@ -176,7 +176,8 @@ const CustomLogin = ({ onLoginSuccess }) => {
         if (formData.phone === applicantData.phone_number) {
             onLoginSuccess({ 
                 ...applicantData, 
-                full_name: applicantData.name 
+                full_name: applicantData.name,
+                role: role // Use the currently selected role ('parent' or 'student')
             });
         } else {
             setError('입력하신 전화번호가 등록된 정보와 일치하지 않습니다.');
@@ -384,8 +385,12 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                     <ShieldCheck className="w-10 h-10 text-ios-emerald" />
                                 </div>
                                 <div className="space-y-2">
-                                    <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">본인 확인</h2>
-                                    <p className="text-[11px] text-ios-gray font-bold">등록된 전화번호를 입력해 주세요.</p>
+                                    <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">
+                                        {role === 'parent' ? '학생 확인' : '본인 확인'}
+                                    </h2>
+                                    <p className="text-[11px] text-ios-gray font-bold">
+                                        {role === 'parent' ? '자녀의 전화번호를 입력해 주세요.' : '등록된 전화번호를 입력해 주세요.'}
+                                    </p>
                                 </div>
                             </div>
 
@@ -394,7 +399,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                 <input 
                                     required
                                     type="tel" 
-                                    placeholder="등록된 휴대폰 번호"
+                                    placeholder={role === 'parent' ? "자녀의 휴대폰 번호" : "등록된 휴대폰 번호"}
                                     value={formData.phone}
                                     onChange={(e) => setFormData({...formData, phone: autoHyphen(e.target.value)})}
                                     className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none"
@@ -409,7 +414,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                 type="submit"
                                 className="w-full py-4 bg-white text-[#1C1C1E] border border-gray-100 rounded-2xl font-black text-sm shadow-xl shadow-gray-200/50 ios-tap"
                             >
-                                본인 확인 완료
+                                {role === 'parent' ? '자녀 확인 완료' : '본인 확인 완료'}
                             </button>
                         </form>
                     )}

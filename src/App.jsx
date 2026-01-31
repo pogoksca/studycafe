@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Layout, Calendar, User, Settings, LogOut, Search, MapPin, ShieldCheck, Map, Users, RefreshCw } from 'lucide-react'
+import { Layout, Calendar, User, Settings, LogOut, Search, MapPin, ShieldCheck, Map, Users, RefreshCw, Printer } from 'lucide-react'
 import FloorPlanEditor from './components/admin/FloorPlanEditor'
 import AttendanceManager from './components/admin/AttendanceManager'
 import SafetySupervision from './components/admin/SafetySupervision'
@@ -11,8 +11,10 @@ import BookingWizard from './components/booking/BookingWizard'
 import UserProfile from './components/profile/UserProfile'
 import StudentManagement from './components/admin/StudentManagement'
 import CustomLogin from './components/auth/CustomLogin'
+import ParentMobileView from './components/parent/ParentMobileView'
 import OperationManager from './components/admin/OperationManager'
 import SystemSettings from './components/admin/SystemSettings'
+import AttendancePrint from './components/admin/AttendancePrint'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
@@ -180,6 +182,7 @@ function App() {
       group: '현장 모니터링',
       items: [
         { id: 'attendance', label: '실시간 출석 현황', icon: Search, roles: ['admin', 'teacher'] },
+        { id: 'attendance_print', label: '출석부 출력', icon: Printer, roles: ['admin', 'teacher'] },
         { id: 'safety', label: '안전 관리/감독', icon: ShieldCheck, roles: ['admin', 'teacher'] },
       ]
     },
@@ -211,6 +214,10 @@ function App() {
 
   if (currentUser.role === 'student') {
     return <StudentMobileView onLogout={handleLogout} currentUser={currentUser} />;
+  }
+
+  if (currentUser.role === 'parent') {
+    return <ParentMobileView onLogout={handleLogout} currentUser={currentUser} />;
   }
 
   return (
@@ -395,6 +402,7 @@ function App() {
               <div className="h-full w-full rounded-2xl overflow-hidden shadow-sm border border-black/5 bg-white">
                 {adminSubTab === 'layout' ? <FloorPlanEditor /> : 
                  adminSubTab === 'attendance' ? <AttendanceManager /> : 
+                 adminSubTab === 'attendance_print' ? <AttendancePrint /> :
                  adminSubTab === 'students' ? <StudentManagement /> :
                  adminSubTab === 'schedule' ? <OperationManager /> :
                  adminSubTab === 'settings' ? <SystemSettings /> :
