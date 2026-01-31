@@ -224,7 +224,7 @@ function App() {
               <Layout className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-tighter leading-tight italic uppercase text-[#1C1C1E]">{schoolName.split(' ')[0]}</h1>
+              <h1 className="text-lg font-black tracking-tighter leading-tight uppercase text-[#1C1C1E]">{schoolName.split(' ')[0]}</h1>
               <p className="text-[8px] font-black tracking-[0.2em] text-ios-indigo uppercase opacity-80">{schoolName.split(' ').slice(1).join(' ') || 'Study Cafe'}</p>
             </div>
           </div>

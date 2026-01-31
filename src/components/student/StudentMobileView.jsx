@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
-  Home, Map, List, MapPin, User, LogOut,
+  Home, Map, List, MapPin, User, LogOut, Layout,
   ChevronRight, ChevronLeft, Calendar, CheckCircle2, BookOpen, Clock
 } from 'lucide-react';
 import StudentBookingMobileWizard from './StudentBookingMobileWizard';
@@ -321,28 +321,31 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
   return (
     <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
       {/* Header */}
-      <header className="flex-none bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-5 py-4 flex items-center justify-between z-50 sticky top-0 pt-[max(1rem,env(safe-area-inset-top))]">
-        <div>
-           <div className="flex items-center gap-2">
-             <h1 className="text-lg font-black text-[#1C1C1E] tracking-tight">{schoolName}</h1>
-             {currentSession && (
-               <span className="bg-ios-indigo/10 text-ios-indigo text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">
-                 {currentSession.name} 진행 중
-               </span>
-             )}
-           </div>
-           <p className="text-[11px] font-bold text-ios-gray mt-0.5">
-             {format(new Date(), 'M월 d일 (EEE)', { locale: ko })}
-           </p>
-        </div>
+      <header className="flex-none bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-5 py-3 flex items-center justify-between z-50 sticky top-0 pt-[max(1rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-3">
-            <div className="text-right block">
-                <p className="text-xs font-black text-[#1C1C1E]">{currentUser?.full_name}</p>
-                <p className="text-[10px] font-bold text-ios-gray">{currentUser?.username}</p>
+           <div className="w-10 h-10 rounded-[10px] bg-[#1C1C1E] flex items-center justify-center shadow-sm">
+             <Layout className="w-5 h-5 text-white" />
+           </div>
+           <div>
+             <h1 className="text-[17px] font-black text-[#1C1C1E] tracking-tighter leading-tight uppercase">
+                {schoolName.split(' ')[0]}
+             </h1>
+             <p className="text-[9px] font-black tracking-[0.2em] text-ios-indigo uppercase opacity-80 leading-none mt-0.5">
+                {schoolName.split(' ').slice(1).join(' ') || 'STUDY CAFE'}
+             </p>
+           </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+            <div className="text-right">
+                <p className="text-[11px] font-black text-[#1C1C1E]">{currentUser?.full_name}</p>
+                <p className="text-[10px] font-black text-ios-gray leading-none mt-0.5">
+                    {format(new Date(), 'yyyy년 M월 d일 (EEE)', { locale: ko })}
+                </p>
             </div>
             <button 
               onClick={onLogout}
-              className="w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-ios-gray hover:text-black hover:bg-gray-200 transition-colors"
+              className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-ios-gray hover:text-black active:scale-95 transition-all border border-gray-100/50"
             >
                 <LogOut className="w-4 h-4" />
             </button>

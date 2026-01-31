@@ -41,6 +41,7 @@ const OperationManager = () => {
     const [loading, setLoading] = useState(true);
     const [savingQuarters, setSavingQuarters] = useState(false);
     const [savingDefaults, setSavingDefaults] = useState(false);
+    const [showWeekends, setShowWeekends] = useState(false); 
 
     const [newException, setNewException] = useState({
         date: format(new Date(), 'yyyy-MM-dd'),
@@ -282,26 +283,47 @@ const OperationManager = () => {
                     ))}
                 </div>
             </div>
-            <div className="flex gap-2">
-                <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                    <ChevronLeft className="w-5 h-5 text-ios-gray" />
-                </button>
-                <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                    <ChevronRight className="w-5 h-5 text-ios-gray" />
-                </button>
+            <div className="flex gap-4 items-center">
+                {/* Weekend Toggle */}
+                <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative">
+                        <input 
+                            type="checkbox" 
+                            className="sr-only peer"
+                            checked={showWeekends}
+                            onChange={(e) => setShowWeekends(e.target.checked)}
+                        />
+                        <div className="w-10 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-ios-indigo"></div>
+                    </div>
+                    <span className="text-[11px] font-black text-ios-gray uppercase tracking-widest peer-checked:text-[#1C1C1E] transition-colors">토/일 표시</span>
+                </label>
+
+                <div className="flex gap-2">
+                    <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                        <ChevronLeft className="w-5 h-5 text-ios-gray" />
+                    </button>
+                    <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
+                        <ChevronRight className="w-5 h-5 text-ios-gray" />
+                    </button>
+                </div>
             </div>
         </div>
     );
 
     const renderDays = () => {
         const days = ['일', '월', '화', '수', '목', '금', '토'];
+        const displayDays = showWeekends ? days : days.slice(1, 6);
+        
         return (
-            <div className="grid grid-cols-7 mb-2 border-b border-gray-100">
-                {days.map((day, i) => (
-                    <div key={i} className={`py-3 text-[10px] font-black uppercase text-center tracking-widest ${i === 0 ? 'text-ios-rose' : i === 6 ? 'text-ios-indigo' : 'text-ios-gray'}`}>
-                        {day}
-                    </div>
-                ))}
+            <div className={`grid ${showWeekends ? 'grid-cols-7' : 'grid-cols-5'} mb-2 border-b border-gray-100`}>
+                {displayDays.map((day, i) => {
+                    const actualIndex = showWeekends ? i : i + 1;
+                    return (
+                        <div key={actualIndex} className={`py-3 text-[10px] font-black uppercase text-center tracking-widest ${actualIndex === 0 ? 'text-ios-rose' : actualIndex === 6 ? 'text-ios-indigo' : 'text-ios-gray'}`}>
+                            {day}
+                        </div>
+                    );
+                })}
             </div>
         );
     };
@@ -309,13 +331,18 @@ const OperationManager = () => {
     const renderCells = () => {
         const monthStart = startOfMonth(currentMonth);
         const monthEnd = endOfMonth(monthStart);
-        const startDate = startOfWeek(monthStart);
-        const endDate = endOfWeek(monthEnd);
+        const startDate = startOfWeek(monthStart, { weekStartsOn: showWeekends ? 0 : 1 });
+        const endDate = endOfWeek(monthEnd, { weekStartsOn: showWeekends ? 0 : 1 });
 
-        const calendarDays = eachDayOfInterval({ start: startDate, end: endDate });
+        let calendarDays = eachDayOfInterval({ start: startDate, end: endDate });
+        
+        // If not showing weekends, filter them out
+        if (!showWeekends) {
+            calendarDays = calendarDays.filter(day => day.getDay() !== 0 && day.getDay() !== 6);
+        }
 
         return (
-            <div className="grid grid-cols-7 gap-px bg-gray-100 border border-gray-100 rounded-[12px] overflow-hidden shadow-sm">
+            <div className={`grid ${showWeekends ? 'grid-cols-7' : 'grid-cols-5'} gap-px bg-gray-100 border border-gray-100 rounded-[12px] overflow-hidden shadow-sm`}>
                 {calendarDays.map((date, i) => {
                     const isToday = isSameDay(date, new Date());
                     const isSameMonthDate = isSameMonth(date, monthStart);
