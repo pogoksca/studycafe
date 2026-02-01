@@ -104,3 +104,43 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Base Scrollbar Styling - Thin and Subtle */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #E5E5EA; /* ios-gray-5 */
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #D1D1D6; /* ios-gray-4 */
+}
+
+/* Firefox support (simplified) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #E5E5EA transparent;
+}
+
+/* Print Utilities */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  body, html {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+}

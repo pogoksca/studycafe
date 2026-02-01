@@ -393,7 +393,7 @@ const SafetySupervision = () => {
                             key={z.id}
                             onClick={() => setSelectedZoneId(z.id)}
                             className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ios-tap ${
-                                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E]'
+                                selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'text-ios-gray hover:text-[#1C1C1E]'
                             }`}
                         >
                             {z.name}

@@ -38,7 +38,7 @@ const UserProfile = ({ user }) => {
                     timestamp_in
                 )
             `)
-            .eq('user_id', user.id)
+            .or(`user_id.eq.${user.id},student_id.eq.${user.id}`)
             .gte('date', startOfAcademicYear);
 
         if (bookingData) {

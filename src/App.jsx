@@ -16,8 +16,9 @@ import OperationManager from './components/admin/OperationManager'
 import SystemSettings from './components/admin/SystemSettings'
 import AttendancePrint from './components/admin/AttendancePrint'
 import ZoneManagement from './components/admin/ZoneManagement'
+import SeatMapModal from './components/booking/SeatMapModal'
 import { supabase } from './lib/supabase'
-import { format } from 'date-fns'
+import { format, parseISO } from 'date-fns'
 
 
 function App() {
@@ -60,6 +61,7 @@ function App() {
   const [isMobilePortrait, setIsMobilePortrait] = useState(() => {
     return window.innerWidth < 768 && window.innerHeight > window.innerWidth;
   });
+  const [isSeatModalOpen, setIsSeatModalOpen] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -78,30 +80,19 @@ function App() {
     let combinedResults = [];
     
     try {
-      // Search in 'profiles' (Students who have already joined/signed up)
-      // Reference error 23503 occurs if we use IDs from applicant_pool because bookings table references profiles.id
-      let queryBuilder = supabase
-        .from('profiles')
+      // User confirmed 'profiles_student' is the correct table
+      const { data, error } = await supabase
+        .from('profiles_student')
         .select('*')
-        .eq('role', 'student') 
+        .or(`full_name.ilike.%${query}%,username.ilike.%${query}%`)
         .limit(50);
-
-      // If exactly 3 digits, prioritize "Class Search" (Starts With)
-      if (/^\d{3}$/.test(query)) {
-         queryBuilder = queryBuilder.or(`username.like.${query}%,full_name.ilike.%${query}%,username.ilike.%${query}%`);
-      } else {
-         // General search
-         queryBuilder = queryBuilder.or(`full_name.ilike.%${query}%,username.ilike.%${query}%`);
-      }
-      
-      const { data, error } = await queryBuilder;
 
       if (error) {
          console.error('[Search Error]', error);
-      } else {
+      } else if (data) {
          // Map results to the expected format
          combinedResults = data.map(item => ({
-            id: item.id, // This is the real UUID from profiles table
+            id: item.id,
             full_name: item.full_name,
             username: item.username,
             grade: item.grade || 0,
@@ -151,6 +142,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem('adminSubTab', adminSubTab);
   }, [adminSubTab]);
+
+  const handleZoneChange = (zoneId) => {
+    setSelectedZoneId(zoneId);
+    setSelectedSeat(null); // Explicitly clear seat on zone change
+  };
 
   const handleLogout = () => {
     setCurrentUser(null);
@@ -323,8 +319,6 @@ function App() {
                           <div>
                             <div className="text-[13px] font-bold text-[#1C1C1E] group-hover:text-ios-indigo transition-colors">{s.full_name}</div>
                             <div className="text-[10px] text-gray-400 font-mono flex items-center gap-1">
-                              <span>ID: {s.username}</span>
-                              {s.grade > 0 && <span className="text-gray-300">|</span>}
                               {s.grade > 0 && <span>{s.grade}학년 {s.class_number}반 {s.student_number}번</span>}
                             </div>
                           </div>
@@ -433,7 +427,7 @@ function App() {
                         viewDate={viewDate}
                         onDateChange={setViewDate}
                         selectedZoneId={selectedZoneId}
-                        onZoneChange={setSelectedZoneId}
+                        onZoneChange={handleZoneChange}
                       />
                     </div>
                   </div>
@@ -448,9 +442,21 @@ function App() {
                       initialDate={viewDate}
                       onDateChange={setViewDate}
                       currentZoneId={selectedZoneId}
+                      onOpenSeatModal={() => setIsSeatModalOpen(true)}
                     />
                   </div>
                 </section>
+                
+                <SeatMapModal 
+                  isOpen={isSeatModalOpen} 
+                  onClose={() => setIsSeatModalOpen(false)} 
+                  zoneId={selectedZoneId} 
+                  onSelect={(seat) => { 
+                    setSelectedSeat(seat); 
+                    setIsSeatModalOpen(false); 
+                  }} 
+                  selectedDate={parseISO(viewDate)} 
+                />
               </div>
             )}
           </div>

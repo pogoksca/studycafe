@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Check, User, PenTool, Search, LogOut, ChevronRight, ChevronLeft, Menu, MapPin, Clock, X, Map as MapIcon } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, addDays, isWithinInterval, parseISO, startOfDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import AttendanceManager from '../admin/AttendanceManager';
 import '../../styles/mobile.css';
@@ -158,11 +158,82 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
     const fetchInitialData = async () => {
         setLoading(true);
         const { data: zoneData } = await supabase.from('zones').select('*').eq('is_active', true).order('created_at', { ascending: true });
+        
+        let initialDate = format(new Date(), 'yyyy-MM-dd');
+
         if (zoneData && zoneData.length > 0) {
             setZones(zoneData);
-            setSelectedZoneId(zoneData[0].id);
+            const firstZoneId = zoneData[0].id;
+            setSelectedZoneId(firstZoneId);
+
+            // Fetch operating requirements to find the default date
+            const [qData, eData, sData] = await Promise.all([
+                supabase.from('operation_quarters').select('*'),
+                supabase.from('operation_exceptions').select('*').eq('zone_id', firstZoneId),
+                supabase.from('sessions').select('id').eq('zone_id', firstZoneId)
+            ]);
+
+            if (sData.data && sData.data.length > 0) {
+                const { data: rulesData } = await supabase
+                    .from('session_operating_days')
+                    .select('session_id, day_of_week')
+                    .in('session_id', sData.data.map(s => s.id))
+                    .eq('is_active', true);
+
+                initialDate = findNextOperatingDate(new Date(), qData.data || [], eData.data || [], rulesData || []);
+                setSelectedDate(initialDate);
+            }
         }
-        fetchSupervisionData();
+        
+        // Final fetch with the determined date
+        const { data: supervisionData } = await supabase
+            .from('supervision_assignments')
+            .select('*')
+            .eq('date', initialDate);
+        
+        if (supervisionData) setTodayAssignments(supervisionData);
+        setLoading(false);
+    };
+
+    const findNextOperatingDate = (startDate, quarters, exceptions, rules) => {
+        let current = startOfDay(startDate);
+        for (let i = 0; i < 30; i++) {
+            const dStr = format(current, 'yyyy-MM-dd');
+            if (checkIsOperating(current, quarters, exceptions, rules)) {
+                return dStr;
+            }
+            current = addDays(current, 1);
+        }
+        return format(startDate, 'yyyy-MM-dd');
+    };
+
+    const checkIsOperating = (date, quarters, exceptions, rules) => {
+        const dStr = format(date, 'yyyy-MM-dd');
+        
+        // 1. Check Quarters
+        if (quarters.length > 0) {
+            const isInQuarter = quarters.some(q =>
+                q.start_date && q.end_date &&
+                isWithinInterval(date, {
+                    start: parseISO(q.start_date),
+                    end: parseISO(q.end_date)
+                })
+            );
+            if (!isInQuarter) return false;
+        }
+
+        // 2. Check Exceptions
+        const isException = exceptions.some(e => e.exception_date === dStr);
+        if (isException) return false;
+
+        // 3. Check Rules (Weekdays)
+        if (rules.length > 0) {
+            const dayOfWeek = date.getDay();
+            const hasRule = rules.some(r => r.day_of_week === dayOfWeek);
+            if (!hasRule) return false;
+        }
+
+        return true;
     };
 
     const fetchSupervisionData = async () => {
@@ -183,11 +254,31 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             .eq('zone_id', selectedZoneId)
             .order('start_time', { ascending: true });
             
-        if (data) {
+        if (data && data.length > 0) {
             setSessions(data);
-            const now = format(new Date(), 'HH:mm:ss');
-            const current = data.find(s => now >= s.start_time && now <= s.end_time);
-            setActiveSession(current ? current.id : data[0]?.id);
+            
+            const nowTime = format(new Date(), 'HH:mm:ss');
+            let candidate = null;
+
+            for (let i = 0; i < data.length; i++) {
+                const s = data[i];
+                const prevS = i > 0 ? data[i-1] : null;
+
+                if (!prevS) {
+                    // First session window: 07:00 ~ its end_time
+                    if (nowTime >= '07:00:00' && nowTime <= s.end_time) {
+                        candidate = s;
+                        break;
+                    }
+                } else {
+                    // Subsequent sessions: previous end_time ~ its end_time
+                    if (nowTime > prevS.end_time && nowTime <= s.end_time) {
+                        candidate = s;
+                        break;
+                    }
+                }
+            }
+            setActiveSession(candidate ? candidate.id : data[0]?.id);
         }
     };
 
@@ -209,6 +300,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             .select(`
                 id, seat_id, session_id,
                 profiles (full_name, username, grade),
+                profiles_student (full_name, username, grade),
                 attendance (id, status, timestamp_in, timestamp_out)
             `)
             .eq('date', selectedDate);
@@ -218,17 +310,21 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                 const activeBooking = (allDailyBookings || []).find(b => b.seat_id === s.id && b.session_id === activeSession);
                 const isBookedToday = (allDailyBookings || []).some(b => b.seat_id === s.id);
                 const attendance = activeBooking?.attendance?.[0];
+                
+                const occupant = activeBooking?.profiles_student || activeBooking?.profiles;
 
                 return {
                     seat_id: s.id,
+                    place_id: s.zone_id, // alias for clarity or just use zone_id
+                    zone_id: s.zone_id,
                     seat_number: s.seat_number,
                     display_number: s.display_number,
                     zone_name: s.zone_name,
                     zone_color: s.zone_color,
                     booking_id: activeBooking?.id,
-                    full_name: activeBooking?.profiles?.full_name,
-                    username: activeBooking?.profiles?.username,
-                    grade: activeBooking?.profiles?.grade,
+                    full_name: occupant?.full_name,
+                    username: occupant?.username,
+                    grade: occupant?.grade,
                     attendance_id: attendance?.id,
                     status: attendance?.status || 'absent',
                     timestamp_in: attendance?.timestamp_in,
@@ -368,14 +464,9 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const zoneLetter = zoneObj?.code || 'A';
         const zoneFullName = zoneObj?.name || 'A ZONE';
 
-        const filteredStatsData = attendanceData.filter(item => 
-            item.zone_name === zoneFullName || 
-            item.zone_name === zoneLetter || 
-            (item.seat_number && item.seat_number.startsWith(zoneLetter))
-        );
-
-        const presentCount = filteredStatsData.filter(d => d.status === 'present').length;
-        const absentCount = filteredStatsData.filter(d => d.is_active && (d.status === 'absent' || !d.status)).length;
+        // Use all attendance data for stats to reflect the full list view (Zones A, B, C)
+        const presentCount = attendanceData.filter(d => d.status === 'present').length;
+        const absentCount = attendanceData.filter(d => d.is_active && (d.status === 'absent' || !d.status)).length;
 
         return (
             <header className="flex-none glass-header px-6 pt-10 pb-4 flex flex-col gap-5 z-50">
@@ -388,9 +479,9 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                         {currentView === 'attendance' && (
                             <button 
                                 onClick={() => setCurrentView('seatmap')}
-                                className="p-2.5 bg-ios-indigo/10 text-ios-indigo rounded-apple-md ios-tap border border-ios-indigo/10"
+                                className="px-3 py-2.5 bg-ios-indigo/10 text-ios-indigo rounded-apple-md ios-tap border border-ios-indigo/10 text-[12px] font-black whitespace-nowrap"
                             >
-                                <MapIcon className="w-5 h-5" />
+                                좌석표로 보기
                             </button>
                         )}
                         {currentView !== 'menu' ? (
@@ -412,8 +503,8 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                     <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-top-4 duration-300">
                         {/* Zone Selection & Date Navigation */}
                         <div className="flex gap-2 items-stretch">
-                            <div className="flex-1 bg-gray-200/20 p-1 rounded-apple-md border border-white/40 flex items-center justify-center min-h-[38px] backdrop-blur-xl">
-                                <span className="text-[12px] font-black text-[#1C1C1E] px-2">
+                            <div className="flex-1 bg-[#1C1C1E] p-1 rounded-apple-md border border-white/10 flex items-center justify-center min-h-[38px] shadow-sm">
+                                <span className="text-[12px] font-black text-white px-2">
                                     {zoneName}
                                 </span>
                             </div>
@@ -425,8 +516,8 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                 >
                                     <ChevronLeft className="w-4 h-4" />
                                 </button>
-                                <span className="text-[11px] font-black text-[#1C1C1E]">
-                                    {selectedDate.substring(5)} ({['일','월','화','수','목','금','토'][new Date(selectedDate).getDay()]})
+                                <span className="text-[13px] font-black text-[#1C1C1E]">
+                                    {selectedDate} ({['일','월','화','수','목','금','토'][new Date(selectedDate).getDay()]})
                                 </span>
                                 <button 
                                     onClick={() => changeDate(1)}
@@ -446,7 +537,9 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                             key={s.id}
                                             onClick={() => setActiveSession(s.id)}
                                             className={`flex-1 px-3 py-2.5 rounded-apple-md text-xs font-black whitespace-nowrap transition-all ios-tap ${
-                                                activeSession === s.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray'
+                                                activeSession === s.id 
+                                                    ? 'bg-ios-indigo text-white shadow-lg shadow-ios-indigo/20' 
+                                                    : 'bg-white/50 text-ios-gray border border-gray-100'
                                             }`}
                                         >
                                             {s.name}
@@ -512,7 +605,9 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const todayStr = format(now, 'yyyy-MM-dd');
         const isPastDate = selectedDate < todayStr;
         const isToday = selectedDate === todayStr;
+        const isFutureDate = selectedDate > todayStr;
         const isExpired = currentUser?.role !== 'admin' && (isPastDate || (isToday && currentTime > lastSessionEnd));
+        const limitedFuture = currentUser?.role !== 'admin' && isFutureDate;
 
         return (
             <main className="flex-1 flex flex-col h-full overflow-hidden" style={{ padding: '0 1rem 1rem 1rem' }}>
@@ -538,7 +633,11 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                 </div>
                                 
                                 {!assign.signature_url && (
-                                    isExpired ? (
+                                    limitedFuture ? (
+                                        <div className="w-full py-5 bg-gray-50 text-gray-400 rounded-2xl text-center border border-gray-100">
+                                            <p className="text-sm font-bold">서명은 당일에만 가능합니다.</p>
+                                        </div>
+                                    ) : isExpired ? (
                                         <div className="w-full py-5 bg-gray-50 text-gray-400 rounded-2xl text-center border border-gray-100">
                                             <p className="text-sm font-bold">감독 시간이 종료되어 서명할 수 없습니다.</p>
                                         </div>

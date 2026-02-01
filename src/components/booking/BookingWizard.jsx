@@ -32,11 +32,12 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
-const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, initialDate, onDateChange, currentZoneId }) => {
+const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, initialDate, onDateChange, currentZoneId, onOpenSeatModal }) => {
   const [step, setStep] = useState(1);
   const [date, setDate] = useState(initialDate || format(addDays(new Date(), 2), 'yyyy-MM-dd'));
   const [firstAvailableDate, setFirstAvailableDate] = useState(format(addDays(new Date(), 2), 'yyyy-MM-dd'));
   const [sessions, setSessions] = useState([]);
+  const [zones, setZones] = useState([]);
   const [selectedSessions, setSelectedSessions] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [authUser, setAuthUser] = useState(null); // The actual logged-in user
@@ -46,12 +47,15 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Sync date when initialDate changes (e.g. from map)
   useEffect(() => {
     if (initialDate) {
       setDate(initialDate);
     }
   }, [initialDate]);
+
+  useEffect(() => {
+    supabase.from('zones').select('id, name').then(({ data }) => setZones(data || []));
+  }, []);
 
   const sessionNameMap = {
     'Morning': '조회시간 이전',
@@ -76,12 +80,11 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
 
       if (effectiveZoneId) {
         setLoading(true);
-        const [sData, qData, dData, eData, configData] = await Promise.all([
+        const [sData, qData, eData, configData] = await Promise.all([
           supabase.from('sessions').select('*').eq('zone_id', effectiveZoneId).order('start_time', { ascending: true }),
           supabase.from('operation_quarters').select('*'),
-          supabase.from('operation_defaults').select('*').eq('zone_id', effectiveZoneId),
           supabase.from('operation_exceptions').select('*').eq('zone_id', effectiveZoneId),
-          supabase.from('configs').select('*').eq('key', `zone_op_config_${effectiveZoneId}`).single()
+          supabase.from('configs').select('*').eq('key', `zone_op_config_${effectiveZoneId}`).maybeSingle()
         ]);
 
         if (sData.data) setSessions(sData.data);
@@ -135,7 +138,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
       if (!selectedSeat) return;
       const { data } = await supabase
           .from('bookings')
-          .select('*, profiles(username, full_name)')
+          .select('*, profiles(username, full_name), profiles_student(username, full_name)')
           .eq('seat_id', selectedSeat.id)
           .eq('date', date);
       setSeatDayBookings(data || []);
@@ -275,11 +278,13 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
             }
         }
         const bookingsToInsert = selectedSessions.map(session => ({
-            user_id: currentUser.id,
+            user_id: loggedInUser.id, // Who made the booking (admin/teacher or student)
+            student_id: targetUser ? targetUser.id : loggedInUser.id, // Who the booking is for (targetUser if proxy, else loggedInUser)
             seat_id: selectedSeat.id,
             session_id: session.id,
             date: date,
-            created_at: getKSTISOString()
+            created_at: getKSTISOString(),
+            status: 'confirmed'
         }));
         const { error: bookingError } = await supabase.from('bookings').insert(bookingsToInsert);
         if (bookingError) {
@@ -367,8 +372,8 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
         {/* Legend */}
         <div className="mt-4 pt-4 border-t border-gray-50 flex items-center gap-4 px-1">
             <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-[#1C1C1E]/10" />
-                <span className="text-[10px] font-bold text-ios-gray/70">운영일</span>
+                <div className="w-2 h-2 rounded-full bg-[#1C1C1E]" />
+                <span className="text-[10px] font-bold text-[#1C1C1E]">운영일</span>
             </div>
             <div className="flex items-center gap-1.5">
                 <div className="w-2 h-2 rounded-full bg-ios-indigo/20" />
@@ -380,7 +385,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
   };
 
   return (
-    <div className="bg-white border border-gray-100 border-b-0 rounded-t-[6px] rounded-b-none pt-[10px] px-6 pb-6 lg:px-8 lg:pb-8 space-y-5 animate-spring-up overflow-hidden relative h-full">
+    <div className="bg-white border border-gray-100 border-b-0 rounded-t-[6px] rounded-b-none pt-[10px] px-6 pb-6 lg:px-8 lg:pb-8 space-y-5 animate-spring-up relative min-h-full">
       <div className="absolute top-0 right-0 w-24 h-24 bg-ios-indigo/5 blur-2xl -z-10" />
       
       {/* Selected Seat Info - Relocated to Top */}
@@ -389,9 +394,11 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
           {selectedSeat ? (selectedSeat.display_number || selectedSeat.seat_number) : '?'}
         </div>
         <div>
-          <p className="text-[9px] font-black text-[#000000] uppercase tracking-[0.2em] mb-0.5 opacity-50">현재 선택된 좌석</p>
+          <p className="text-[9px] font-black text-[#000000] uppercase tracking-[0.2em] mb-0.5 opacity-50">
+            {selectedSeat ? '현재 선택된 좌석' : '원하는 좌석을 더블 클릭하여'}
+          </p>
           <p className="text-base font-black text-[#1C1C1E]">
-            {selectedSeat ? `Zone ${selectedSeat.zone_name}` : '좌석을 선택해 주세요'}
+            {selectedSeat ? `Zone ${zones.find(z => z.id === selectedSeat.zone_id)?.name || ''}` : '좌석을 선택해 주세요'}
           </p>
         </div>
       </div>
@@ -423,12 +430,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
                    <p className="text-[11px] font-black text-ios-rose italic">{isDateOperating(date).msg}</p>
                </div>
             )}
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 text-center">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">선택된 날짜</p>
-                <p className="text-lg font-black text-[#1C1C1E]">
-                    {format(parseISO(date), 'yyyy년 M월 d일 (EEEE)', { locale: ko })}
-                </p>
-            </div>
+
           </div>
           
           {error && (
@@ -439,7 +441,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
           )}
 
           {/* Bottom Controls */}
-          <div className="mt-8 pt-6 border-t border-gray-50 flex gap-3">
+          <div className="mt-1 pt-0 border-t-0 flex gap-3">
             <button 
               onClick={onComplete}
               className="flex-1 py-3.5 rounded-xl text-sm font-black text-ios-gray bg-gray-50 hover:bg-gray-100 transition-all ios-tap"
@@ -500,16 +502,20 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
                         <div className="flex items-center gap-2">
                             <p className="font-black text-base text-[#1C1C1E]">{getSessionName(s.name)}</p>
                             {isAlreadyBooked && <span className="text-[9px] font-black text-ios-gray bg-gray-200 px-1.5 py-0.5 rounded-full uppercase">이미 예약됨</span>}
-                            {!isAlreadyBooked && isSeatTaken && (
+                        {['admin', 'teacher'].includes(authUser?.role) && (() => {
+                            const booking = seatDayBookings.find(b => b.session_id === s.id);
+                            if (!booking) return null;
+                            const occupant = booking.profiles_student || booking.profiles;
+                            if (!occupant) return null; 
+                            return (
                                 <div className="flex flex-col items-start gap-1">
                                     <span className="text-[9px] font-black text-ios-rose bg-ios-rose/10 px-1.5 py-0.5 rounded-full uppercase">좌석 점유됨</span>
-                                    {['admin', 'teacher'].includes(authUser?.role) && seatDayBookings.find(b => b.session_id === s.id)?.profiles && (
-                                        <span className="text-[9px] font-bold text-ios-rose/70">
-                                            {seatDayBookings.find(b => b.session_id === s.id).profiles.username} {seatDayBookings.find(b => b.session_id === s.id).profiles.full_name}
-                                        </span>
-                                    )}
+                                    <span className="text-[9px] font-bold text-ios-rose/70">
+                                        {occupant.username} {occupant.full_name}
+                                    </span>
                                 </div>
-                            )}
+                            );
+                        })()}
                         </div>
                         <p className="text-[10px] font-black text-ios-gray/70 uppercase tracking-tight mt-0.5">
                             {s.start_time.slice(0,5)} ~ {s.end_time.slice(0,5)}

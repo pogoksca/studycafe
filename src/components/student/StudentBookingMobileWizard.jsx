@@ -25,6 +25,10 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const [selectedSection, setSelectedSection] = useState('A'); // Default section
   const [studyContent, setStudyContent] = useState('');
 
+  // Management State
+  const [manageDate, setManageDate] = useState(null);
+  const [dailyBookings, setDailyBookings] = useState({}); // { 'yyyy-MM-dd': [bookings...] }
+
   // Helper: Get clean seat number (strip section prefix)
   const getCleanSeatNumber = (seat) => {
       if (!seat) return '';
@@ -94,15 +98,12 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
     const fetchZoneData = async () => {
         setLoading(true);
         try {
-            // Parallel Fetch: Sessions, Defaults, Exceptions, AND Seats for this Zone
-            const [sRes, dRes, eRes, seatsRes] = await Promise.all([
+            // Parallel Fetch: Sessions, Exceptions, AND Seats for this Zone
+            const [sRes, eRes, seatsRes] = await Promise.all([
                  supabase.from('sessions')
                     .select('*')
                     .eq('zone_id', selectedZoneId)
                     .order('start_time'),
-                 supabase.from('operation_defaults')
-                    .select('*')
-                    .eq('zone_id', selectedZoneId),
                  supabase.from('operation_exceptions')
                     .select('*')
                     .eq('zone_id', selectedZoneId),
@@ -157,19 +158,27 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             const { data: bookings } = await supabase
                 .from('bookings')
                 .select(`
-                    date,
+                    *,
+                    sessions (id, name, start_time, end_time),
+                    seats (id, seat_number, zone_name, zone_id, zones(name)),
                     attendance (
                         status
                     )
                 `)
-                .eq('user_id', currentUser.id);
+                .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`);
             
             if (bookings) {
                 const activityMap = {};
+                const bookingMap = {};
                 const todayStr = format(new Date(), 'yyyy-MM-dd');
                 
                 bookings.forEach(b => {
                     const d = b.date;
+                    
+                    // Populate Booking Map
+                    if (!bookingMap[d]) bookingMap[d] = [];
+                    bookingMap[d].push(b);
+
                     const att = b.attendance && b.attendance[0];
                     
                     let status = 'reserved';
@@ -197,6 +206,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     }
                 });
                 setUserActivities(activityMap);
+                setDailyBookings(bookingMap);
             }
         } catch (err) {
             console.error("Error fetching user activities:", err);
@@ -316,16 +326,22 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     return (
                         <button
                             key={idx}
-                            disabled={!available}
-                            onClick={() => setSelectedDate(date)}
+                            disabled={!available && !activity}
+                            onClick={() => {
+                                if (activity) {
+                                    setManageDate(date);
+                                } else if (available) {
+                                    setSelectedDate(date);
+                                }
+                            }}
                             className={`
                                 aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all relative
                                 ${isSelected 
                                     ? 'bg-[#1C1C1E] text-white shadow-xl scale-105 z-10' 
-                                    : activity === 'present' ? 'bg-ios-emerald/10 text-ios-emerald' :
-                                      activity === 'late' ? 'bg-ios-amber/10 text-ios-amber' :
-                                      activity === 'absent' ? 'bg-ios-rose/10 text-ios-rose' :
-                                      activity === 'reserved' ? 'bg-ios-indigo/10 text-ios-indigo' :
+                                    : activity === 'present' ? 'bg-ios-emerald text-white border-none' :
+                                      activity === 'late' ? 'bg-ios-amber text-white border-none' :
+                                      activity === 'absent' ? 'bg-ios-rose text-white border-none' :
+                                      activity === 'reserved' ? 'bg-ios-indigo text-white border-none' :
                                       available 
                                         ? 'bg-white text-[#1C1C1E] border border-gray-100 hover:border-gray-300' 
                                         : 'bg-transparent text-gray-400 cursor-not-allowed' 
@@ -333,15 +349,6 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                             `}
                         >
                             <span className={!available && !activity ? 'opacity-50' : ''}>{format(date, 'd')}</span>
-                            {activity && (
-                                <span className={`w-1.5 h-1.5 rounded-full absolute bottom-2 ${
-                                    isSelected ? 'bg-white' :
-                                    activity === 'present' ? 'bg-ios-emerald' :
-                                    activity === 'late' ? 'bg-ios-amber' :
-                                    activity === 'absent' ? 'bg-ios-rose' :
-                                    'bg-ios-indigo'
-                                }`} />
-                            )}
                         </button>
                     );
                 })}
@@ -368,6 +375,176 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             </div>
         </div>
     );
+  };
+
+
+
+  // Step 1.5: Management Step (Overlay)
+  const renderManagementStep = () => {
+      if (!manageDate) return null;
+      
+      const dateStr = format(manageDate, 'yyyy-MM-dd');
+      const bookingsForDate = dailyBookings[dateStr] || [];
+      const canManage = isDateBookable(manageDate);
+
+      // Sort bookings by start time
+      bookingsForDate.sort((a, b) => (a.sessions?.start_time || '').localeCompare(b.sessions?.start_time || ''));
+
+      const handleDelete = async () => {
+          if (!confirm('정말로 이 예약을 취소하시겠습니까?')) return;
+          
+          setLoading(true);
+          try {
+              const bookingIds = bookingsForDate.map(b => b.id);
+              
+              const { error } = await supabase
+                  .from('bookings')
+                  .delete()
+                  .in('id', bookingIds);
+
+              if (error) throw error;
+              
+              alert('예약이 취소되었습니다.');
+              setManageDate(null);
+              // Refresh
+              const { data: bookings } = await supabase
+                .from('bookings')
+                .select(`
+                    *,
+                    sessions (id, name, start_time, end_time),
+                    seats (id, seat_number, zone_name, zone_id, zones(name)),
+                    attendance (status)
+                `)
+                .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`);
+               
+               // Re-process
+                if (bookings) {
+                    const activityMap = {};
+                    const bookingMap = {};
+                    const todayStr = format(new Date(), 'yyyy-MM-dd');
+                    bookings.forEach(b => {
+                        const d = b.date;
+                        if (!bookingMap[d]) bookingMap[d] = [];
+                        bookingMap[d].push(b);
+                        const att = b.attendance && b.attendance[0];
+                        let status = 'reserved';
+                        if (d < todayStr) {
+                             if (att) status = (att.status === 'present' ? 'present' : att.status === 'late' ? 'late' : 'absent');
+                             else status = 'absent';
+                        } else if (d === todayStr) {
+                             if (att) status = (att.status === 'present' ? 'present' : att.status === 'late' ? 'late' : 'reserved');
+                        }
+                        // Simple logic for refresh
+                         if (!activityMap[d] || (status === 'present' && activityMap[d] !== 'present') || (status === 'late' && activityMap[d] === 'absent')) {
+                            activityMap[d] = status;
+                        }
+                    });
+                    setUserActivities(activityMap);
+                    setDailyBookings(bookingMap);
+                }
+
+          } catch (err) {
+              console.error("Delete failed:", err);
+              alert('예약 취소 중 오류가 발생했습니다.');
+          } finally {
+              setLoading(false);
+          }
+      };
+
+      const handleModify = async () => {
+          if (!confirm('예약을 수정하시겠습니까? 기존 예약은 취소되며, 새로운 예약을 진행합니다.')) return;
+          
+          setLoading(true);
+          try {
+               const bookingIds = bookingsForDate.map(b => b.id);
+               const { error } = await supabase.from('bookings').delete().in('id', bookingIds);
+               if (error) throw error;
+               
+               setSelectedDate(manageDate);
+               setSelectedSessionIds([]);
+               setSelectedZoneId(null);
+               setSelectedSeatNumber('');
+               setStudyContent('');
+
+               setManageDate(null);
+               setCurrentStep(1); // Go to Session selection
+               
+          } catch (err) {
+              console.error("Modify failed:", err);
+              alert('예약 수정 준비 중 오류가 발생했습니다.');
+          } finally {
+              setLoading(false);
+          }
+      };
+
+      return (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-fade-in">
+              <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
+                  <div className="p-6">
+                      <div className="flex items-center justify-between mb-6">
+                            <h3 className="text-xl font-black text-[#1C1C1E]">
+                                {format(manageDate, 'M월 d일')} 예약 상세
+                            </h3>
+                            <button onClick={() => setManageDate(null)} className="p-2 -mr-2 text-gray-400 hover:text-black">
+                                <X className="w-5 h-5" />
+                            </button>
+                      </div>
+
+                      <div className="space-y-4 mb-8 max-h-[50vh] overflow-y-auto scrollbar-hide">
+                          {bookingsForDate.length > 0 ? bookingsForDate.map((b, i) => (
+                              <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between">
+                                  <div>
+                                      <p className="text-sm font-black text-[#1C1C1E] mb-1">
+                                          {b.sessions?.name}
+                                      </p>
+                                      <p className="text-xs text-ios-gray font-bold">
+                                          {b.sessions?.start_time.slice(0,5)} ~ {b.sessions?.end_time.slice(0,5)}
+                                      </p>
+                                  </div>
+                                  <div className="text-right">
+                                      <p className="text-xs font-bold text-[#1C1C1E]">
+                                          {b.seats?.zones?.name}
+                                      </p>
+                                      <p className="text-xs text-ios-indigo font-bold">
+                                          {b.seats?.seat_number}번
+                                      </p>
+                                  </div>
+                              </div>
+                          )) : (
+                              <p className="text-center text-gray-400 text-sm">예약 정보가 없습니다.</p>
+                          )}
+                      </div>
+
+                      <div className="flex gap-3">
+                          <button
+                              onClick={handleDelete}
+                              disabled={!canManage || loading}
+                              className={`flex-1 py-3 rounded-xl font-bold text-sm border-2 border-red-100 text-red-500 bg-red-50 hover:bg-red-100 transition-colors
+                                  ${(!canManage || loading) ? 'opacity-50 cursor-not-allowed' : ''}
+                              `}
+                          >
+                              예약 취소
+                          </button>
+                          <button
+                              onClick={handleModify}
+                              disabled={!canManage || loading}
+                              className={`flex-1 py-3 rounded-xl font-bold text-sm bg-ios-indigo text-white hover:bg-ios-indigo/90 transition-colors shadow-lg shadow-ios-indigo/30
+                                  ${(!canManage || loading) ? 'opacity-50 cursor-not-allowed shadow-none' : ''}
+                              `}
+                          >
+                              수정하기
+                          </button>
+                      </div>
+                      
+                      {!canManage && (
+                          <p className="text-[10px] text-center text-gray-400 font-medium mt-3">
+                              * 학습 예약일 2일전 이후 또는 이미 지난 학습일은 수정/취소가 불가능합니다.
+                          </p>
+                      )}
+                  </div>
+              </div>
+          </div>
+      );
   };
 
   // Step 2: Session
@@ -774,47 +951,57 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
         }
 
         // 2. Insert Bookings (Loop sessions)
-        const bookings = selectedSessionIds.map(sessionId => ({
-            user_id: currentUser.id,
-            seat_id: targetSeatId,
-            date: formattedDate,
-            session_id: sessionId,
-            booking_type: 'regular'
-        }));
+        const bookings = selectedSessionIds.map(sessionId => {
+            const isStudent = currentUser.role === 'student';
+            return {
+                user_id: isStudent ? null : currentUser.id,
+                student_id: isStudent ? currentUser.id : null,
+                seat_id: targetSeatId,
+                date: formattedDate,
+                session_id: sessionId,
+                booking_type: 'regular'
+            };
+        });
 
         const { error: bookingError } = await supabase
             .from('bookings')
             .insert(bookings);
 
-        if (bookingError) throw bookingError;
+        if (bookingError) {
+            console.error("Booking failed:", bookingError);
+            if (bookingError.code === '23505' || bookingError.code === '23503' || bookingError.message?.includes('duplicate')) {
+                throw new Error('선택하신 세션 중 이미 예약된 시간이 포함되어 있습니다. 중복 예약 여부를 확인해주세요.');
+            }
+            throw bookingError;
+        }
 
         // 3. Upsert Study Plan
-        // Plan is per date? or per session? Schema says 'session_id, date'.
-        // User input one content for all sessions? Let's save for EACH session or just the first?
-        // Schema: UNIQUE(user_id, date, session_id)? No unique constraint shown in my memory but logic suggests per slot.
-        // Let's Insert/Upsert for each session to be safe, or just one record if schema supports generic date plan.
-        // Re-reading schema: study_plans has session_id.
-        // We will insert for all selected sessions.
-        const plans = selectedSessionIds.map(sessionId => ({
-            user_id: currentUser.id,
-            date: formattedDate,
-            session_id: sessionId,
-            content: studyContent
-        }));
+        const plans = selectedSessionIds.map(sessionId => {
+            const isStudent = currentUser.role === 'student';
+            return {
+                user_id: isStudent ? null : currentUser.id,
+                student_id: isStudent ? currentUser.id : null,
+                date: formattedDate,
+                session_id: sessionId,
+                content: studyContent
+            };
+        });
 
         const { error: planError } = await supabase
             .from('study_plans')
             .insert(plans);
         
-        // Ignore plan error if duplicate? or just let it throw.
-        // Better to use upsert if supported.
+        if (planError) {
+            console.error("Study plan insert failed:", planError);
+        }
         
         alert('예약이 성공적으로 완료되었습니다!');
         onSuccess();
 
     } catch (err) {
-        console.error("Booking failed:", err);
-        alert('예약 처리에 실패했습니다. 중복된 예약이 있는지 확인해주세요.\n' + err.message);
+        console.error("Final Booking Error:", err);
+        const errorMsg = err.message || '알 수 없는 오류가 발생했습니다.';
+        alert('예약 처리에 실패했습니다. 중복된 예약이 있는지 확인해주세요.\n\n상세내용: ' + errorMsg);
     } finally {
         setLoading(false);
     }
@@ -888,6 +1075,10 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     }
                 }}
             />
+
+            
+            {/* Management Details Modal */}
+            {renderManagementStep()}
     </div>
   );
 };

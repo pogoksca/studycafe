@@ -14,8 +14,8 @@ const SystemSettings = () => {
     const [success, setSuccess] = useState(false);
     
     // Global Settings
-    const [schoolName, setSchoolName] = useState('GOE STUDY CAFE');
-    const [schoolNameEn, setSchoolNameEn] = useState('POGOK');
+    const [schoolName, setSchoolName] = useState('');
+    const [schoolNameEn, setSchoolNameEn] = useState('');
     const [schoolLevel, setSchoolLevel] = useState('고등학교');
     
     // GPS & Safety States
@@ -38,17 +38,19 @@ const SystemSettings = () => {
         setLoading(true);
         try {
             // 1. Fetch School Config
-            const { data: configData } = await supabase.from('configs').select('*').eq('key', 'school_info').single();
+            const { data: configData, error: configError } = await supabase.from('configs').select('*').eq('key', 'school_info').single();
+            if (configError && configError.code !== 'PGRST116') throw configError;
+            
             if (configData) {
-                setSchoolName(configData.value.name || 'POGOK');
-                setSchoolNameEn(configData.value.name_en || 'POGOK');
+                setSchoolName(configData.value.name || '');
+                setSchoolNameEn(configData.value.name_en || '');
                 setSchoolLevel(configData.value.level || '고등학교');
             }
 
-            // 2. Fetch School Config (Placeholder/Alternative)
-            // Zones are now in a separate menu
             // 3. Fetch GPS Config (Global)
-            const { data: gpsData } = await supabase.from('configs').select('*').eq('key', 'gps_settings').single();
+            const { data: gpsData, error: gpsError } = await supabase.from('configs').select('*').eq('key', 'gps_settings').single();
+            if (gpsError && gpsError.code !== 'PGRST116') throw gpsError;
+            
             if (gpsData?.value) {
                 // Migrate legacy latitude/longitude to points if needed
                 if (gpsData.value.points) {

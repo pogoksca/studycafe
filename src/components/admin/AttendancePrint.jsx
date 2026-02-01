@@ -128,9 +128,8 @@ const AttendancePrint = () => {
             // 1. Fetch Students
             const { data: students } = await supabase
                 .from('profiles')
-                .select('*')
-                .in('grade', selectedGrades)
                 .eq('role', 'student')
+                .select('*')
                 .order('grade', { ascending: true })
                 .order('class_number', { ascending: true })
                 .order('student_number', { ascending: true });

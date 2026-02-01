@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fabric } from 'fabric';
-import { Trash2, RotateCw, Plus, Save, Square, MousePointer2, Hash, Palette, Grid, LayoutTemplate } from 'lucide-react';
+import { Trash2, RotateCw, Plus, Save, Square, MousePointer2, Hash, Palette, Grid, LayoutTemplate, Printer } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 const FloorPlanEditor = () => {
@@ -25,6 +25,7 @@ const FloorPlanEditor = () => {
   const [drawStart, setDrawStart] = useState(null);
   const [tempRect, setTempRect] = useState(null);
   const [history, setHistory] = useState([]);
+  const [printConfig, setPrintConfig] = useState({ paper: 'a4', orientation: 'portrait' });
   const [deletedIds, setDeletedIds] = useState([]);
 
   const centerLayout = (targetCanvas) => {
@@ -206,7 +207,6 @@ const FloorPlanEditor = () => {
           width: 0,
           height: 0,
           fill: '#E5E5EA', // Light gray standard
-          rx: 6, ry: 6,
           stroke: '#C7C7CC',
           strokeWidth: 1,
           opacity: 0.7
@@ -536,27 +536,34 @@ const FloorPlanEditor = () => {
 
      canvas.on('mouse:up', () => {
        if (creationModeRef.current === 'structure' && tempRectRef.current) {
-         // Finalize structure creation
          const rect = tempRectRef.current;
          const width = rect.width;
          const height = rect.height;
          const left = rect.left;
          const top = rect.top;
-         
-         canvas.remove(rect); // Remove temp visual
-         setTempRect(null);
-         setDrawStart(null);
-         setCreationMode(null); // Reset mode
  
          // Minimal size check
          if (width > 20 && height > 20) {
            setTimeout(() => {
               const name = prompt('공간요소 이름 (예: 출입문, 벽, 책상)', '구조물');
+              
+              // Final Cleanup after prompt
+              canvas.remove(rect);
+              setTempRect(null);
+              setDrawStart(null);
+              setCreationMode(null);
+
               if (name) {
                 saveToHistory();
                 createStructure(left, top, width, height, name);
               }
            }, 50);
+         } else {
+           // If too small, just cleanup immediately
+           canvas.remove(rect);
+           setTempRect(null);
+           setDrawStart(null);
+           setCreationMode(null);
          }
          return;
        }
@@ -702,7 +709,6 @@ const FloorPlanEditor = () => {
       fill: bgColor,
       width: w,
       height: h,
-      rx: 6, ry: 6,
       stroke: strokeColor,
       strokeWidth: 1,
     });
@@ -749,7 +755,6 @@ const FloorPlanEditor = () => {
         fill: seatData.bg_color || '#E5E5EA',
         width: seatData.width || 72,
         height: seatData.height || 72,
-        rx: 6, ry: 6,
         stroke: seatData.stroke_color || '#D1D1D6',
         strokeWidth: 1,
       });
@@ -1046,6 +1051,235 @@ const FloorPlanEditor = () => {
     
     // Actually, I can just re-fetch the data in saveLayout same way loadSeats does. It's redundant but safe.
     
+    // Print Logic (Duplicated from AttendanceManager for consistency)
+    const handlePrintSeatMap = async () => {
+      if (!fabricRef.current) return;
+      setLoading(true);
+  
+      try {
+        const canvas = fabricRef.current;
+        const objects = canvas.getObjects();
+        
+        if (objects.length === 0) {
+          alert("출력할 요소가 없습니다.");
+          setLoading(false);
+          return;
+        }
+  
+        // 1. Save current viewport and reset to identity to capture FULL map regardless of zoom/pan
+        const originalVpt = canvas.viewportTransform;
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+  
+        // 2. Calculate bounding box of ALL elements in absolute coordinates
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        
+        objects.forEach(obj => {
+            if (!obj.visible || obj.opacity === 0) return;
+            // Exclude invisible interactive layers (transparent fill, no stroke, no text)
+            if ((!obj.fill || obj.fill === 'transparent') && (!obj.stroke || obj.stroke === 'transparent') && !obj.text) return;
+            
+            // getBoundingRect() returns coordinates in global standard system (since we reset viewport)
+            let bound = obj.getBoundingRect();
+            
+            minX = Math.min(minX, bound.left);
+            minY = Math.min(minY, bound.top);
+            maxX = Math.max(maxX, bound.left + bound.width);
+            maxY = Math.max(maxY, bound.top + bound.height);
+        });
+  
+        // Add a small safety buffer for strokes/shadows
+        const buffer = 20;
+        const contentX = minX - buffer;
+        const contentY = minY - buffer;
+        const contentWidth = (maxX - minX) + (buffer * 2);
+        const contentHeight = (maxY - minY) + (buffer * 2);
+  
+        // 3. Capture high-res image
+        const imgData = canvas.toDataURL({
+          format: 'png',
+          left: contentX,
+          top: contentY,
+          width: contentWidth,
+          height: contentHeight,
+          multiplier: 3 
+        });
+  
+        // 4. Restore original viewport
+        canvas.setViewportTransform(originalVpt);
+  
+        // 3. Setup Paper Dimensions
+        const { paper, orientation } = printConfig;
+        const paperWidth = paper === 'b4' ? 257 : 210;
+        const paperHeight = paper === 'b4' ? 364 : 297;
+        
+        const pageWidth = orientation === 'landscape' ? paperHeight : paperWidth;
+        const pageHeight = orientation === 'landscape' ? paperWidth : paperHeight;
+  
+        const marginTop = 20;
+        const marginSides = 10;
+        const marginBottom = 10;
+  
+        // 4. Create and inject hidden iframe for printing
+        const iframe = document.createElement('iframe');
+        iframe.style.position = 'fixed';
+        iframe.style.right = '0';
+        iframe.style.bottom = '0';
+        iframe.style.width = '0';
+        iframe.style.height = '0';
+        iframe.style.border = '0';
+        document.body.appendChild(iframe);
+  
+        const zoneName = zones.find(z => z.id === selectedZoneId)?.name || '';
+        const dateStr = new Date().toISOString().split('T')[0];
+        
+        // Construct Print Document
+        const doc = iframe.contentWindow.document;
+        doc.open();
+        doc.write(`
+          <html>
+            <head>
+              <title>좌석 배치표 - ${zoneName}</title>
+              <style>
+                @page {
+                  size: ${paper} ${orientation};
+                  margin: 0;
+                }
+                html, body {
+                  margin: 0;
+                  padding: 0;
+                  width: 100%;
+                  height: 100vh;
+                  background: white;
+                  -webkit-print-color-adjust: exact;
+                  overflow: hidden !important;
+                }
+                .print-container {
+                  width: 100%;
+                  height: 100vh;
+                  padding: ${marginTop}mm ${marginSides}mm ${marginBottom}mm ${marginSides}mm;
+                  box-sizing: border-box;
+                  display: flex;
+                  flex-direction: column;
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                  overflow: hidden !important;
+                  background: white;
+                }
+                .header {
+                  flex-shrink: 0;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: flex-end;
+                  border-bottom: 2px solid #1C1C1E;
+                  padding-bottom: 3mm; /* Reduced padding */
+                  margin-bottom: 2mm; /* Reduced margin */
+                }
+                .header h1 {
+                  margin: 0;
+                  font-size: 16pt; /* Slightly smaller to save space */
+                  font-weight: 900;
+                  letter-spacing: -1px;
+                  color: #1C1C1E;
+                }
+                .header .info {
+                  text-align: right;
+                }
+                .header .info .zone {
+                  font-size: 10pt;
+                  font-weight: 800;
+                  color: #5856D6;
+                  margin: 0;
+                }
+                .header .info .date {
+                  font-size: 8pt;
+                  color: #8E8E93;
+                  margin: 0;
+                }
+                /* Content area strictly confined to remaining space */
+                .content {
+                  flex: 1;
+                  display: flex;
+                  justify-content: center; /* Center */
+                  align-items: center;
+                  min-height: 0;
+                  padding: 0; /* Remove arbitrary padding to maximize scale */
+                  margin: 0;
+                  overflow: hidden;
+                }
+                /* Image autoscaling using object-fit */
+                .content img {
+                  width: 100%;
+                  height: 100%;
+                  object-fit: contain;
+                  object-position: center; /* Center image */
+                  display: block;
+                }
+                .footer {
+                  flex-shrink: 0;
+                  margin-top: 1mm; /* Reduced margin */
+                  text-align: center;
+                  border-top: 1px solid #F2F2F7;
+                  padding-top: 2mm;
+                }
+                .footer p {
+                  margin: 0;
+                  font-size: 7pt;
+                  color: #AEAEB2;
+                  font-weight: bold;
+                  letter-spacing: 1px;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="print-container">
+                <div class="header">
+                  <h1>좌석 배치표</h1>
+                  <div class="info">
+                    <p class="zone">${zoneName}</p>
+                    <p class="date">${dateStr} 기준</p>
+                  </div>
+                </div>
+                <div class="content">
+                  <img src="${imgData}" />
+                </div>
+                <div class="footer">
+                  <p>POGOK STUDY CAFE MANAGEMENT SYSTEM</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `);
+        doc.close();
+  
+        // Trigger print from the iframe
+        const triggerPrint = () => {
+          const frameWin = iframe.contentWindow;
+          frameWin.focus();
+          // Slightly wait for image rendering inside the iframe
+          setTimeout(() => {
+            frameWin.print();
+            // Cleanup
+            setTimeout(() => {
+              document.body.removeChild(iframe);
+              setLoading(false);
+            }, 1000);
+          }, 800);
+        };
+  
+        // Ensure the image inside the iframe is also ready
+        const printImg = doc.querySelector('img');
+        if (printImg.complete) {
+          triggerPrint();
+        } else {
+          printImg.onload = triggerPrint;
+        }
+  
+      } catch (err) {
+        console.error("Print generation failed:", err);
+        alert("인쇄 준비 중 오류가 발생했습니다.");
+        setLoading(false);
+      }
+    };
+  
     const saveLayout = async () => {
     setLoading(true);
 
@@ -1273,6 +1507,15 @@ const FloorPlanEditor = () => {
           >
             <Save className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             레이아웃 저장
+          </button>
+          
+          <button 
+            onClick={handlePrintSeatMap} 
+            disabled={loading}
+            className="flex items-center gap-2 bg-white text-[#1C1C1E] px-5 py-2.5 rounded-apple-md text-[12px] font-black border border-gray-200 hover:bg-gray-50 transition-all ios-tap disabled:opacity-50 shadow-sm ml-2"
+          >
+            <Printer className={`w-4 h-4 ${loading ? 'animate-pulse' : ''}`} />
+            좌석표 인쇄
           </button>
         </div>
       </div>

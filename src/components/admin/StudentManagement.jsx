@@ -281,9 +281,15 @@ const StudentManagement = () => {
                 if (error) throw error;
             } else {
                 // Normal status update (pending, approved, rejected)
+                // Clear rejection reason if moving to approved
+                const updateData = { status, rejection_reason: reason, role };
+                if (status === 'approved') {
+                    updateData.rejection_reason = null;
+                }
+                
                 const { error } = await supabase
                     .from('applicant_pool')
-                    .update({ status, rejection_reason: reason, role })
+                    .update(updateData)
                     .eq('id', applicant.id);
 
                 if (error) throw error;
@@ -517,12 +523,15 @@ const StudentManagement = () => {
                                     )}
                                 </td>
                                  <td className="px-6 py-4 align-middle text-center">
-                                    <span className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                        applicant.status === 'approved' ? 'bg-[#ECFDF5] text-[#065F46]' :
-                                        applicant.status === 'pending' ? 'bg-[#FFFBEB] text-[#92400E]' :
-                                        applicant.status === 'rejected' ? 'bg-[#FFF1F2] text-[#9F1239]' :
-                                        'bg-gray-100 text-ios-gray'
-                                    }`}>
+                                    <span 
+                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                            applicant.status === 'approved' ? 'bg-[#ECFDF5] text-[#065F46]' :
+                                            applicant.status === 'pending' ? 'bg-[#FFFBEB] text-[#92400E]' :
+                                            applicant.status === 'rejected' ? 'bg-[#FFF1F2] text-[#9F1239]' :
+                                            'bg-gray-100 text-ios-gray'
+                                        }`}
+                                        title={applicant.status === 'rejected' ? `거절 사유: ${applicant.rejection_reason || '사유 없음'}` : ''}
+                                    >
                                         {applicant.status === 'approved' ? '승인됨' :
                                          applicant.status === 'pending' ? '승인 대기' :
                                          applicant.status === 'rejected' ? '거절됨' : '신청 전'}

@@ -13,7 +13,7 @@ import { ko } from 'date-fns/locale';
 const StudentMobileView = ({ onLogout, currentUser }) => {
   const [activeTab, setActiveTab] = useState('home'); // home, map, attendance, profile
   const [currentSession, setCurrentSession] = useState(null);
-  const [schoolName, setSchoolName] = useState('GOE STUDY CAFE'); // Default name
+  const [schoolName, setSchoolName] = useState(''); // Default name
   const [todayStudyPlan, setTodayStudyPlan] = useState('');
   const [weeklyData, setWeeklyData] = useState({}); // { 'yyyy-MM-dd': { bookings: [], attendance: [] } }
   const [currentDate, setCurrentDate] = useState(new Date()); // For calendar navigation
@@ -83,7 +83,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                     timestamp_out
                 )
             `)
-            .eq('user_id', currentUser.id)
+            .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
             .gte('date', format(start, 'yyyy-MM-dd'))
             .lte('date', format(end, 'yyyy-MM-dd'));
             
@@ -229,16 +229,26 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                             const status = getDayStatus(dateStr, dayData);
                             const isCur = isSameDay(day, new Date()); // Check against real today
                             
+                            let bgClass = isCur 
+                                ? 'bg-[#1C1C1E] text-white shadow-lg ring-4 ring-white z-10' 
+                                : 'bg-white/50 border border-white/40 text-gray-300';
+                            
+                            if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
+                                bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
+                            } else if (status?.label === '지각') {
+                                bgClass = 'bg-ios-amber text-white shadow-sm border-none';
+                            } else if (status?.label === '결석' || status?.label === '미입실') {
+                                bgClass = 'bg-ios-rose text-white shadow-sm border-none';
+                            } else if (status?.label === '예약') {
+                                bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
+                            }
+
                             return (
                                 <div key={i} className="flex flex-col items-center gap-2">
                                     <span className={`text-[9px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
                                         {['월','화','수','목','금','토','일'][i]}
                                     </span>
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${
-                                        isCur 
-                                        ? 'bg-[#1C1C1E] text-white shadow-lg ring-4 ring-white z-10' 
-                                        : 'bg-white/50 border border-white/40 text-gray-300'
-                                    }`}>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${bgClass}`}>
                                         {format(day, 'd')}
                                     </div>
                                     <div className="h-4 flex items-center justify-center">

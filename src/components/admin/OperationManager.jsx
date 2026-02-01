@@ -73,15 +73,11 @@ const OperationManager = () => {
 
     const fetchData = async (year, zoneId) => {
         setLoading(true);
-        const [qData, dData, eData, sData] = await Promise.all([
+        const [qData, eData, sData] = await Promise.all([
             supabase.from('operation_quarters')
                 .select('*')
                 .eq('academic_year', year)
                 .order('quarter', { ascending: true }),
-            supabase.from('operation_defaults')
-                .select('*')
-                .eq('zone_id', zoneId)
-                .order('day_of_week', { ascending: true }),
             supabase.from('operation_exceptions')
                 .select('*')
                 .eq('zone_id', zoneId)
@@ -289,52 +285,40 @@ const OperationManager = () => {
 
     // Calendar Rendering
     const renderHeader = () => (
-        <div className="flex items-center justify-between mb-6 px-2">
-            <div className="flex items-center gap-6">
-                <div>
-                    <h3 className="text-xl font-black text-[#1C1C1E] tracking-tight">
-                        {format(currentMonth, 'yyyy년 MMMM', { locale: ko })}
-                    </h3>
-                    <p className="text-[10px] font-black text-ios-indigo uppercase tracking-widest mt-1">Operating Calendar</p>
-                </div>
-
-                {/* Zone Selection */}
-                <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
-                    {zones.map(z => (
-                        <button
-                            key={z.id}
-                            onClick={() => setSelectedZoneId(z.id)}
-                            className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ios-tap ${
-                                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E]'
-                            }`}
-                        >
-                            {z.name}
+        <div className="flex flex-col gap-6 mb-4 px-2">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-8 flex-wrap">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors ios-tap">
+                            <ChevronLeft className="w-5 h-5 text-ios-gray" />
                         </button>
-                    ))}
-                </div>
-            </div>
-            <div className="flex gap-4 items-center">
-                {/* Weekend Toggle */}
-                <label className="flex items-center gap-2 cursor-pointer group">
-                    <div className="relative">
-                        <input 
-                            type="checkbox" 
-                            className="sr-only peer"
-                            checked={showWeekends}
-                            onChange={(e) => setShowWeekends(e.target.checked)}
-                        />
-                        <div className="w-10 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-ios-indigo"></div>
+                        <div className="text-center">
+                            <h3 className="text-xl font-black text-[#1C1C1E] tracking-tight">
+                                {format(currentMonth, 'yyyy년 MMMM', { locale: ko })}
+                            </h3>
+                            <p className="text-[10px] font-black text-ios-indigo uppercase tracking-widest mt-0.5">Operating Calendar</p>
+                        </div>
+                        <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors ios-tap">
+                            <ChevronRight className="w-5 h-5 text-ios-gray" />
+                        </button>
                     </div>
-                    <span className="text-[11px] font-black text-ios-gray uppercase tracking-widest peer-checked:text-[#1C1C1E] transition-colors">토/일 표시</span>
-                </label>
 
-                <div className="flex gap-2">
-                    <button onClick={() => setCurrentMonth(subMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                        <ChevronLeft className="w-5 h-5 text-ios-gray" />
-                    </button>
-                    <button onClick={() => setCurrentMonth(addMonths(currentMonth, 1))} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
-                        <ChevronRight className="w-5 h-5 text-ios-gray" />
-                    </button>
+                    {/* Zone Selection */}
+                    <div className="flex gap-1.5 flex-wrap">
+                        {zones.map(z => (
+                            <button
+                                key={z.id}
+                                onClick={() => setSelectedZoneId(z.id)}
+                                className={`px-5 py-2 rounded-apple-md text-[11px] font-black transition-all border ios-tap ${
+                                    selectedZoneId === z.id 
+                                        ? 'bg-[#1C1C1E] text-white border-[#1C1C1E] shadow-sm' 
+                                        : 'bg-white text-ios-gray border-gray-100 hover:text-[#1C1C1E] hover:border-gray-200'
+                                }`}
+                            >
+                                {z.name}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
@@ -345,7 +329,7 @@ const OperationManager = () => {
         const displayDays = showWeekends ? days : days.slice(1, 6);
         
         return (
-            <div className={`grid ${showWeekends ? 'grid-cols-7' : 'grid-cols-5'} mb-2 border-b border-gray-100`}>
+            <div className={`grid ${showWeekends ? 'grid-cols-7' : 'grid-cols-5'} mb-2 border-b border-gray-100 sticky top-0 z-10 bg-white`}>
                 {displayDays.map((day, i) => {
                     const actualIndex = showWeekends ? i : i + 1;
                     return (
@@ -449,16 +433,36 @@ const OperationManager = () => {
     );
 
     return (
-        <div className="flex flex-col lg:flex-row gap-6 h-full overflow-hidden">
+        <div className="flex flex-col lg:flex-row gap-6 h-full overflow-hidden p-1">
             {/* Left: Calendar View */}
-            <div className="flex-1 bg-white rounded-[6px] border border-gray-100 flex flex-col p-6 shadow-sm overflow-y-auto scrollbar-hide">
+            <div className="flex-1 min-h-0 bg-white rounded-[6px] border border-gray-100 flex flex-col p-6 shadow-sm overflow-hidden">
                 {renderHeader()}
-                {renderDays()}
-                {renderCells()}
+                
+                {/* Body Row - Single scrollable area for both header and cells */}
+                <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+                    {renderDays()}
+                    {renderCells()}
+                    
+                    {/* Weekend Toggle - Closely below cells */}
+                    <div className="mt-3 flex justify-start pb-2">
+                        <label className="flex items-center gap-2 cursor-pointer group">
+                            <div className="relative">
+                                <input 
+                                    type="checkbox" 
+                                    className="sr-only peer"
+                                    checked={showWeekends}
+                                    onChange={(e) => setShowWeekends(e.target.checked)}
+                                />
+                                <div className="w-10 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-ios-indigo"></div>
+                            </div>
+                            <span className="text-[11px] font-black text-ios-gray uppercase tracking-widest peer-checked:text-[#1C1C1E] transition-colors">토/일 표시</span>
+                        </label>
+                    </div>
+                </div>
             </div>
 
             {/* Right: Settings Control */}
-            <div className="lg:w-96 flex flex-col gap-6 overflow-y-auto scrollbar-hide pb-6">
+            <div className="lg:w-96 shrink-0 flex flex-col gap-6 overflow-y-auto pb-6 pr-2">
 
                 {/* 1. Academic Year & Quarter Dates */}
                 <div className="bg-white rounded-[6px] border border-gray-100 p-6 shadow-sm">

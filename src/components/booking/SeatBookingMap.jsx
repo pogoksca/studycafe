@@ -37,6 +37,13 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     if (!selectedZoneId) return;
     let isMounted = true;
 
+    // Reset selection and canvas state immediately when zone changes
+    setSelectedSeat(null);
+    if (onSelectSeat) onSelectSeat(null);
+    if (fabricRef.current) {
+        fabricRef.current.clear();
+    }
+
     const init = async () => {
       // 1. Fetch operating data
       const [qData, eData, sData] = await Promise.all([
@@ -53,11 +60,43 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
           .in('session_id', (sData.data || []).map(s => s.id))
           .eq('is_active', true);
 
-        setOpData({
+        const combinedOpData = {
           quarters: qData.data || [],
           exceptions: eData.data || [],
           operatingRules: rulesData || []
-        });
+        };
+        
+        setOpData(combinedOpData);
+
+        // Helper to check operating logic with raw data
+        const checkOperating = (dStr, quarters, exceptions, opRules) => {
+           const targetDate = parseISO(dStr);
+           // 1. Quarters
+           const isInQuarter = quarters.some(q => q.start_date && q.end_date && isWithinInterval(targetDate, { start: parseISO(q.start_date), end: parseISO(q.end_date) }));
+           if (!isInQuarter) return false;
+           // 2. Exceptions
+           if (exceptions.find(e => e.exception_date === dStr)) return false;
+           // 3. Rules
+           const dayOfWeek = targetDate.getDay();
+           return opRules.some(r => r.day_of_week === dayOfWeek);
+        };
+
+        // Smart Default Date Logic: If current viewDate is not operating, find next valid day
+        if (!checkOperating(viewDate, combinedOpData.quarters, combinedOpData.exceptions, combinedOpData.operatingRules)) {
+             let checkDate = addDays(parseISO(viewDate), 1);
+             let found = false;
+             let iterations = 0;
+             while (!found && iterations < 60) { // Search up to 60 days ahead
+                 const dStr = format(checkDate, 'yyyy-MM-dd');
+                 if (checkOperating(dStr, combinedOpData.quarters, combinedOpData.exceptions, combinedOpData.operatingRules)) {
+                     onDateChange(dStr); // Update date
+                     found = true;
+                 } else {
+                     checkDate = addDays(checkDate, 1);
+                     iterations++;
+                 }
+             }
+        }
       }
 
       // 2. Load sessions for zone
@@ -88,12 +127,17 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       if (!isMounted) return;
 
       canvas.on('mouse:down', (options) => {
-        if (!options.target) {
-          canvas.isDragging = true;
-          canvas.selection = false;
-          canvas.lastPosX = options.e.clientX || options.e.touches?.[0]?.clientX;
-          canvas.lastPosY = options.e.clientY || options.e.touches?.[0]?.clientY;
-        } else if (options.target.data) {
+        canvas.calcOffset(); // Precision calibration
+        
+        // Allow panning anywhere, even on seats
+        canvas.isDragging = true;
+        canvas.selection = false;
+        canvas.lastPosX = options.e.clientX || options.e.touches?.[0]?.clientX;
+        canvas.lastPosY = options.e.clientY || options.e.touches?.[0]?.clientY;
+      });
+
+      canvas.on('mouse:dblclick', (options) => {
+        if (options.target && options.target.data) {
           const seatData = options.target.data;
           setSelectedSeat(seatData);
           if (onSelectSeat) onSelectSeat(seatData);
@@ -121,6 +165,9 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       });
 
       canvas.on('mouse:move', (options) => {
+        // Continuous calibration during coordinate interaction
+        canvas.calcOffset();
+
         if (canvas.isDragging) {
           const e = options.e;
           const clientX = e.clientX || e.touches?.[0]?.clientX;
@@ -165,7 +212,32 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
         fabricRef.current = null;
       }
     };
-  }, [selectedZoneId, currentUser, viewDate]); 
+  }, [selectedZoneId, currentUser, viewDate]);
+
+  // Handle window resize/scroll to correct canvas offset (Fix click position drift)
+  // Using RAF for high-performance realtime updates
+  useEffect(() => {
+    let rafId;
+
+    const handleResize = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      
+      rafId = requestAnimationFrame(() => {
+         if (fabricRef.current) {
+           fabricRef.current.calcOffset();
+         }
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleResize, true); 
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleResize, true);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []); 
 
   const isDateOperating = (dStr) => {
     const targetDate = parseISO(dStr);
@@ -240,11 +312,17 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
       .order('global_number', { ascending: true });
     
     // Fetch bookings for the selected date
-    const { data: todayBookings } = await supabase
-      .from('bookings')
-      .select('*, profiles(username, full_name), sessions!inner(*)')
-      .eq('date', viewDate)
-      .eq('sessions.zone_id', selectedZoneId);
+    let todayBookings = [];
+    if (sessList && sessList.length > 0) {
+      const sessionIds = sessList.map(s => s.id);
+      const { data } = await supabase
+        .from('bookings')
+        .select('*, profiles(username, full_name), profiles_student(username, full_name)') // Fetch both booker (profiles) and actual student (profiles_student)
+        .eq('date', viewDate)
+        .in('session_id', sessionIds);
+      
+      if (data) todayBookings = data;
+    }
 
     if (seats && seats.length > 0) {
       if (!canvas || canvas.isDisposed || !canvas.getContext()) return; 
@@ -283,7 +361,16 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
           pos_x: s.pos_x + offsetX,
           pos_y: s.pos_y + offsetY
         }, seatBookings, activeSession, sessList);
+
       });
+      
+      // Initial Centering for Wide Layouts (Mobile)
+      if (layoutWidth > parentWidth) {
+          const vpt = canvas.viewportTransform;
+          vpt[4] = (parentWidth - layoutWidth) / 2;
+          canvas.setViewportTransform(vpt);
+          canvas.requestRenderAll();
+      }
     }
     setLoading(false);
   };
@@ -295,7 +382,6 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
         fill: seatData.bg_color || '#E5E5EA',
         width: seatData.width || 72,
         height: seatData.height || 72,
-        rx: 12, ry: 12,
         stroke: seatData.stroke_color || '#D1D1D6',
         strokeWidth: 1,
       });
@@ -403,7 +489,8 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
           
           if (!booking) return `${prefix}:`;
           if (canSeeDetails(booking)) {
-             return `${prefix}:${booking.profiles.full_name.substring(0,4)}`; 
+             const occupant = booking.profiles_student || booking.profiles;
+             return `${prefix}:${occupant?.full_name.substring(0,4) || ''}`;
            } else {
               return `${prefix}:(예약완료)`;
            }
@@ -458,10 +545,12 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
          statusObjects.push(vDivider);
 
          let info = '';
+
          if (booking) {
             if (canSeeDetails(booking)) {
-               const studentId = booking.profiles.username || '';
-               const name = booking.profiles.full_name || '';
+               const occupant = booking.profiles_student || booking.profiles;
+               const studentId = occupant?.username || '';
+               const name = occupant?.full_name || '';
                info = studentId ? `${studentId} ${name}` : name;
             } else {
                info = `(예약완료)`;
@@ -518,18 +607,29 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
     canvas.add(group);
   };
 
+  // Helper to center viewport if content > container
+  const centerViewport = (canvas, layoutWidth, parentWidth) => {
+      if (!canvas || !canvas.viewportTransform) return;
+      if (layoutWidth > parentWidth) {
+          const vpt = canvas.viewportTransform;
+          vpt[4] = (parentWidth - layoutWidth) / 2; // Center X
+          canvas.setViewportTransform(vpt);
+          canvas.requestRenderAll();
+      }
+  };
+
   return (
     <div className="flex flex-col gap-4 w-full h-full relative overflow-hidden">
       {/* Zone Selection Header - Hidden in Minimal Mode */}
       {!minimal && (
       <div className="flex items-center gap-4 px-1">
-      <div className="flex gap-[10px] m-[10px] mb-0 border-none shrink-0 p-1 bg-gray-200/20 rounded-apple-md backdrop-blur-xl border border-white/40">
+      <div className="flex gap-[10px] m-[10px] mb-0 border-none shrink-0 p-1 rounded-apple-md backdrop-blur-xl">
           {zones.map(z => (
             <button
               key={z.id}
               onClick={() => onZoneChange(z.id)}
               className={`px-6 py-2 rounded-apple-md text-xs font-black transition-all ios-tap border-none ${
-                selectedZoneId === z.id ? 'bg-white text-[#1C1C1E] shadow-sm' : 'text-ios-gray hover:text-[#1C1C1E] hover:bg-white/40'
+                selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-sm' : 'text-gray-400 hover:text-[#1C1C1E] hover:bg-gray-100'
               }`}
             >
               {z.name}
@@ -537,9 +637,9 @@ const SeatBookingMap = ({ onSelectSeat, selectedProxyUser, viewDate, onDateChang
           ))}
         </div>
 
-        <div className="flex items-center gap-2 text-ios-gray">
-          <Info className="w-3.5 h-3.5" />
-          <span className="text-[10px] font-bold">원하는 구역을 선택하고 좌석을 클릭해 주세요.</span>
+        <div className="flex items-center gap-2">
+          <Info className="w-4 h-4 text-ios-indigo" />
+          <span className="text-xs font-black text-ios-indigo">원하는 구역을 선택하고 좌석을 <span className="text-ios-rose">더블 클릭</span>해 주세요.</span>
         </div>
         
         <div className="flex bg-gray-200/20 p-1 rounded-apple-md border border-white/40 backdrop-blur-xl items-center gap-1 ml-auto">

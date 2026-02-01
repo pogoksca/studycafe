@@ -13,7 +13,7 @@ import { ko } from 'date-fns/locale';
 
 const ParentMobileView = ({ onLogout, currentUser }) => {
   const [activeTab, setActiveTab] = useState('home'); // home, stats, profile
-  const [schoolName, setSchoolName] = useState('GOE STUDY CAFE');
+  const [schoolName, setSchoolName] = useState('');
   const [todayData, setTodayData] = useState({
     bookings: [],
     attendance: [],
@@ -113,11 +113,11 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
       
       const todayStr = format(new Date(), 'yyyy-MM-dd');
       
-      // 1. Today's Hero Data
+        // 1. Today's Hero Data
       const { data: bookings } = await supabase
         .from('bookings')
         .select('*, sessions (*), attendance (*)')
-        .eq('user_id', currentUser.id)
+        .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
         .eq('date', todayStr)
         .order('session_id', { ascending: true });
 
@@ -132,7 +132,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
           sessions (id, start_time, end_time),
           attendance (id, booking_id, status, timestamp_in, timestamp_out)
         `)
-        .eq('user_id', currentUser.id)
+        .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
         .gte('date', format(start, 'yyyy-MM-dd'))
         .lte('date', format(end, 'yyyy-MM-dd'));
         
@@ -169,26 +169,46 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
       if (activeTab === 'stats' || loading) {
         const qStart = format(startOfQuarter(new Date()), 'yyyy-MM-dd');
         const qEnd = format(endOfQuarter(new Date()), 'yyyy-MM-dd');
-        const { data: qBookings } = await supabase
-          .from('bookings')
-          .select('id, date, attendance (status, timestamp_in)')
-          .eq('user_id', currentUser.id)
-          .gte('date', qStart)
-          .lte('date', qEnd);
+        
+        // Fetch both bookings and study plans for the quarter
+        const [bookingsRes, plansRes] = await Promise.all([
+          supabase
+            .from('bookings')
+            .select('id, date, session_id, attendance (status, timestamp_in)')
+            .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
+            .gte('date', qStart)
+            .lte('date', qEnd)
+            .order('date', { ascending: false }),
+          supabase
+            .from('study_plans')
+            .select('date, session_id, content')
+            .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
+            .gte('date', qStart)
+            .lte('date', qEnd)
+        ]);
+
+        const qBookings = bookingsRes.data;
+        const qStudyPlans = plansRes.data;
 
         if (qBookings) {
           const counts = { present: 0, late: 0, absent: 0 };
           const history = [];
+          
           qBookings.forEach(b => {
             const att = b.attendance?.[0];
             if (att) {
               if (att.status === 'present') counts.present++;
               else if (att.status === 'late') counts.late++;
               else if (att.status === 'absent') counts.absent++;
+              
+              // Find matching study plan
+              const plan = qStudyPlans?.find(p => p.date === b.date && p.session_id === b.session_id);
+              
               history.push({
                   date: b.date,
                   status: att.status,
-                  time: att.timestamp_in ? format(new Date(att.timestamp_in), 'HH:mm') : '-'
+                  time: att.timestamp_in ? format(new Date(att.timestamp_in), 'HH:mm') : '-',
+                  content: plan?.content || null
               });
             }
           });
@@ -198,6 +218,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
           });
         }
       }
+
       setLoading(false);
     };
 
@@ -233,18 +254,18 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
           <div className="w-full grid grid-cols-3 gap-2 pt-4 border-t border-gray-50">
             <div className="space-y-1">
-                <p className="text-[9px] font-black text-ios-gray uppercase tracking-widest">좌석 번호</p>
-                <p className="text-xl font-black text-[#1C1C1E]">
+                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">좌석 번호</p>
+                <p className="text-[11px] font-black text-[#1C1C1E]">
                     {todayData.bookings[0]?.seat_number || '-'}
                 </p>
             </div>
             <div className="space-y-1 border-l border-gray-50">
-                <p className="text-[9px] font-black text-ios-gray uppercase tracking-widest">귀가 예정</p>
-                <p className="text-xl font-black text-[#1C1C1E] underline decoration-ios-indigo/30 underline-offset-4">{expected}</p>
+                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">귀가 예정</p>
+                <p className="text-[11px] font-black text-[#1C1C1E] underline decoration-ios-indigo/30 underline-offset-4">{expected}</p>
             </div>
             <div className="space-y-1 border-l border-gray-50">
-                <p className="text-[9px] font-black text-ios-gray uppercase tracking-widest">실제 퇴실</p>
-                <p className="text-xl font-black text-ios-indigo">
+                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">실제 퇴실</p>
+                <p className="text-[11px] font-black text-ios-indigo">
                     {lastOut ? format(new Date(lastOut), 'HH:mm') : '--:--'}
                 </p>
             </div>
@@ -254,10 +275,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         {/* All Sessions Schedule (25%) */}
         <div className="flex-1 glass-card p-5 flex flex-col justify-center space-y-2">
             <div className="flex items-center justify-between mb-1">
-                <h3 className="text-[10px] font-black text-ios-gray uppercase tracking-widest">오늘의 학습 일정</h3>
+                <h3 className="text-[11px] font-black text-ios-gray uppercase tracking-widest">오늘의 학습 일정</h3>
                 <div className="flex items-center gap-1">
                     <div className="w-1 h-1 rounded-full bg-ios-emerald shadow-[0_0_8px_rgba(52,199,89,0.5)]" />
-                    <span className="text-[8px] font-black text-ios-emerald uppercase">Live</span>
+                    <span className="text-[11px] font-black text-ios-emerald uppercase">Live</span>
                 </div>
             </div>
             <div className="space-y-2 overflow-y-auto max-h-[120px] pr-1 scrollbar-hide">
@@ -271,19 +292,19 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                 <div className={`w-1.5 h-1.5 rounded-full ${att?.status === 'present' ? 'bg-ios-emerald' : att?.status === 'late' ? 'bg-ios-amber' : 'bg-gray-200'}`} />
                                 <div>
                                     <p className="text-[11px] font-black text-[#1C1C1E] leading-none mb-1">{booking.sessions?.name}</p>
-                                    <p className="text-[9px] font-bold text-ios-gray leading-none">
+                                    <p className="text-[11px] font-bold text-ios-gray leading-none">
                                         {booking.sessions?.start_time.substring(0,5)} - {booking.sessions?.end_time.substring(0,5)}
                                     </p>
                                 </div>
                             </div>
-                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${status.color}`}>
+                            <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${status.color}`}>
                                 {status.label}
                             </span>
                         </div>
                     );
                 }) : (
                     <div className="flex flex-col items-center justify-center py-4 bg-gray-50 rounded-2xl">
-                        <p className="text-[10px] font-black text-ios-gray">오늘 예정된 세션이 없습니다.</p>
+                        <p className="text-[11px] font-black text-ios-gray">오늘 예정된 세션이 없습니다.</p>
                     </div>
                 )}
             </div>
@@ -292,10 +313,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         {/* Weekly Dashboard Calendar (25%) */}
         <div className="flex-1 glass-card p-5 flex flex-col justify-center items-center">
             <div className="w-full flex items-center justify-between mb-3 px-1">
-                <h3 className="text-[10px] font-black text-ios-gray uppercase tracking-widest">이번 주 학습 현황</h3>
+                <h3 className="text-[11px] font-black text-ios-gray uppercase tracking-widest">이번 주 학습 현황</h3>
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-black text-[#1C1C1E]">
-                        {format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'MM.dd')} - {format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'MM.dd')}
+                    <span className="text-[11px] font-black text-[#1C1C1E]">
+                        {format(startOfWeek(currentCalendarDate, { weekStartsOn: 1 }), 'yyyy.MM.dd', { locale: ko })} - {format(endOfWeek(currentCalendarDate, { weekStartsOn: 1 }), 'yyyy.MM.dd', { locale: ko })}
                     </span>
                     <button onClick={handlePrevWeek} className="p-1 hover:text-black text-gray-400 ios-tap"><ChevronLeft className="w-3 h-3" /></button>
                     <button onClick={handleNextWeek} className="p-1 hover:text-black text-gray-400 ios-tap"><ChevronRight className="w-3 h-3" /></button>
@@ -312,19 +333,31 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                     const status = getDayStatus(dateStr, dayData);
                     const isCur = isSameDay(day, new Date());
                     
+                    let bgClass = isCur 
+                        ? 'bg-[#1C1C1E] text-white shadow-md' 
+                        : 'bg-white border border-gray-100 text-gray-300';
+
+                    if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
+                        bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
+                    } else if (status?.label === '지각') {
+                        bgClass = 'bg-ios-amber text-white shadow-sm border-none';
+                    } else if (status?.label === '결석' || status?.label === '미입실') {
+                        bgClass = 'bg-ios-rose text-white shadow-sm border-none';
+                    } else if (status?.label === '예약') {
+                        bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
+                    }
+                    
                     return (
                         <div key={i} className="flex flex-col items-center gap-1.5">
-                            <span className={`text-[8px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
+                            <span className={`text-[11px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
                                 {['월','화','수','목','금','토','일'][i]}
                             </span>
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-black transition-all ${
-                                isCur ? 'bg-[#1C1C1E] text-white shadow-md' : 'bg-white border border-gray-100 text-gray-300'
-                            }`}>
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black transition-all ${bgClass}`}>
                                 {format(day, 'd')}
                             </div>
                             <div className="h-3 flex items-center justify-center">
                                 {status ? (
-                                    <span className={`text-[7px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${status.color}`}>
+                                    <span className={`text-[11px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${status.color}`}>
                                         {status.label}
                                     </span>
                                 ) : (
@@ -354,22 +387,39 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         <div className="space-y-3">
             <div className="flex items-center justify-between px-2">
                 <h3 className="text-xs font-black text-[#1C1C1E] uppercase tracking-widest">최근 학습 일지</h3>
-                <span className="text-[10px] font-bold text-ios-gray">TOP 15</span>
+                <span className="text-[10px] font-bold text-ios-gray">최근 15기록</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
                 {stats.history.length > 0 ? stats.history.map((h, i) => (
-                    <div key={i} className="bg-white p-4 rounded-apple border border-gray-100 shadow-sm flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                            <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : 'bg-ios-rose'}`} />
-                            <div className="space-y-0.5">
-                                <p className="text-xs font-black text-[#1C1C1E]">{format(new Date(h.date), 'M월 d일 (EEE)', { locale: ko })}</p>
-                                <p className="text-[10px] font-bold text-ios-gray uppercase tracking-widest">{h.status === 'present' ? '정상 이수' : h.status === 'late' ? '지각입실' : '미출석'}</p>
+                    <div key={i} className="bg-white p-4 rounded-apple border border-gray-100 shadow-sm space-y-3 transition-all active:scale-[0.98]">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : 'bg-ios-rose'}`} />
+                                <div className="space-y-0.5">
+                                    <p className="text-xs font-black text-[#1C1C1E]">{format(new Date(h.date), 'M월 d일 (EEE)', { locale: ko })}</p>
+                                    <p className="text-[10px] font-bold text-ios-gray uppercase tracking-widest leading-none">
+                                        {h.status === 'present' ? '정상 이수' : h.status === 'late' ? '지각입실' : '미출석'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                 <p className="text-xs font-black text-ios-gray">{h.time !== '-' ? h.time : '--:--'}</p>
+                                 <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter leading-none">Entry Time</p>
                             </div>
                         </div>
-                        <div className="text-right">
-                             <p className="text-xs font-black text-ios-gray">{h.time !== '-' ? h.time : '--:--'}</p>
-                             <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter">Entry Time</p>
-                        </div>
+                        
+                        {h.content && (
+                            <div className="pt-3 border-t border-gray-50 flex gap-3">
+                                <div className="p-2 bg-ios-indigo/5 rounded-apple flex-shrink-0">
+                                    <BookOpen className="w-3.5 h-3.5 text-ios-indigo" />
+                                </div>
+                                <div className="flex-1">
+                                    <p className="text-[11px] font-bold text-gray-700 leading-relaxed italic">
+                                        "{h.content}"
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )) : (
                     <div className="py-20 text-center space-y-2"><Calendar className="w-10 h-10 text-gray-200 mx-auto" /><p className="text-xs font-black text-ios-gray">학습 기록이 없습니다.</p></div>
