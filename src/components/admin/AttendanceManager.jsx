@@ -194,8 +194,9 @@ const AttendanceManager = ({
           return;
       }
 
-      // Pan if background is clicked or moving
-      if (!target) {
+      // Pan if background is clicked OR an unoccupied seat is clicked
+      const isUnoccupiedSeat = target && target.data && !target.data.booking;
+      if (!target || isUnoccupiedSeat) {
         canvas.isDragging = true;
         canvas.selection = false;
         canvas.lastPosX = evt.clientX || evt.touches?.[0]?.clientX;
