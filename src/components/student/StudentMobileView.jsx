@@ -211,7 +211,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
     switch (activeTab) {
       case 'home':
         return (
-          <div className="flex-1 flex flex-col gap-4 p-4 animate-fade-in relative overflow-y-auto scrollbar-hide">
+          <div className="h-full flex flex-col gap-4 p-4 animate-fade-in relative overflow-hidden">
              {/* Background Decoration */}
              <div className="absolute top-0 right-0 w-64 h-64 bg-ios-indigo/5 blur-3xl -z-10" />
              <div className="absolute bottom-0 left-0 w-64 h-64 bg-ios-blue/5 blur-3xl -z-10" />
@@ -334,12 +334,8 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                <ChevronRight className="w-5 h-5 text-gray-300" />
              </button>
 
-            {/* 2. Attendance/Early Leave Button */}
-            <button 
-              onClick={() => setActiveTab('attendance')}
-              className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
-            >
-               {(() => {
+             {/* 2. Attendance/Early Leave Button */}
+             {(() => {
                  const now = new Date();
                  const isWithin10MinOfNext = nextSession && (() => {
                     const todayStr = format(now, 'yyyy-MM-dd');
@@ -348,47 +344,30 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                     return diff >= 0 && diff <= 10;
                  })();
                  
-                 // Logic: 
-                 // 1. If in session + checked in -> Early Leave
-                 // 2. If NO session + next session exists:
-                 //    - Within 10 min window -> Attendance (Primary, but inside has both)
-                 //    - Longer gap -> Early Leave (allow going home early)
-                 // 3. Else -> Attendance
-                 const shouldShowEarlyLeave = (currentSession && attendanceStatus?.timestamp_in) || 
-                                              (!currentSession && nextSession && !isWithin10MinOfNext);
+                 const isCheckedIn = (currentSession && attendanceStatus?.timestamp_in);
+                 const label = isCheckedIn ? '조퇴신청' : '출석인증';
+                 const subLabel = isCheckedIn ? '지금 바로 퇴실 처리' : (isWithin10MinOfNext ? '지금 바로 출석 인증' : '인증 가능 세션 확인');
+                 const themeColor = isCheckedIn ? 'text-ios-rose bg-ios-rose/10' : 'text-ios-indigo bg-ios-indigo/10';
+                 const Icon = isCheckedIn ? LogOut : CheckCircle2;
 
-                 if (shouldShowEarlyLeave) {
-                   return (
-                    <>
-                      <div className="absolute inset-0 bg-gradient-to-br from-ios-rose/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      <div className="w-14 h-14 rounded-full bg-ios-rose/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
-                        <LogOut className="w-7 h-7 text-ios-rose" />
-                      </div>
-                      <div className="text-left space-y-1 relative z-10 flex-1">
-                        <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">조퇴신청</h2>
-                        <p className="text-xs font-bold text-ios-gray">
-                            {!currentSession ? '다음 세션 시작 전 퇴실 처리' : '현재 세션 도중 조퇴 처리'}
-                        </p>
-                      </div>
-                    </>
-                   );
-                 } else {
-                   return (
-                    <>
-                      <div className="absolute inset-0 bg-gradient-to-br from-ios-emerald/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      <div className="w-14 h-14 rounded-full bg-ios-emerald/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
-                        <MapPin className="w-7 h-7 text-ios-emerald" />
-                      </div>
-                      <div className="text-left space-y-1 relative z-10 flex-1">
-                        <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">출석인증</h2>
-                        <p className="text-xs font-bold text-ios-gray">GPS로 간편하게 인증하세요</p>
-                      </div>
-                    </>
-                   );
-                 }
+                 return (
+                    <button 
+                        onClick={() => setActiveTab('attendance')}
+                        className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-between active:scale-[0.98] transition-all ios-tap mb-4"
+                    >
+                        <div className="flex items-center gap-6">
+                            <div className={`w-14 h-14 rounded-full flex items-center justify-center ${themeColor}`}>
+                                <Icon className="w-7 h-7" />
+                            </div>
+                            <div className="text-left space-y-1">
+                                <h3 className="text-xl font-black text-[#1C1C1E] tracking-tight">{label}</h3>
+                                <p className="text-xs font-bold text-gray-400">{subLabel}</p>
+                            </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-gray-300" />
+                    </button>
+                 );
                })()}
-               <ChevronRight className="w-5 h-5 text-gray-300" />
-             </button>
 
           </div>
         );
@@ -412,7 +391,8 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
         })();
 
         // Prop for AttendanceCheck: It should know if it's generally in an "early leave allowed" state
-        const isEarlyLeaveAllowed = (currentSession && attendanceStatus?.timestamp_in) || (!currentSession && nextSession);
+        // Re-restricted to 10 minutes before session as per latest user request
+        const isEarlyLeaveAllowed = (currentSession && attendanceStatus?.timestamp_in) || (!currentSession && isWithin10MinOfNext);
         
         return (
             <div className="flex-1 bg-white flex flex-col items-center justify-center overflow-y-auto scrollbar-hide px-6">
