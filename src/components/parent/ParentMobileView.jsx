@@ -31,6 +31,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     history: []
   });
   const [loading, setLoading] = useState(true);
+  const [exceptions, setExceptions] = useState([]); // Holiday/Exceptions
 
   // Helper Functions
   const handlePrevWeek = () => setCurrentCalendarDate(prev => subWeeks(prev, 1));
@@ -97,9 +98,9 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     }
 
     if (hasAnyAttendance) {
-        const lastAtt = [...attendance].sort((a,b) => (b.timestamp_in || '').localeCompare(a.timestamp_in || ''))[0];
-        if (lastAtt.timestamp_out) return { label: '귀가 완료', color: 'bg-gray-800 text-white', sub: `${format(new Date(lastAtt.timestamp_out), 'HH:mm')} 퇴실 확인` };
-        return { label: '휴식 중', color: 'bg-ios-amber text-white', sub: '다음 학습 세션을 기다리는 중입니다.' };
+        const lastAtt = attendance.filter(Boolean).sort((a,b) => (b.timestamp_in || '').localeCompare(a.timestamp_in || ''))[0];
+        if (lastAtt && lastAtt.timestamp_out) return { label: '귀가 완료', color: 'bg-gray-800 text-white', sub: `${format(new Date(lastAtt.timestamp_out), 'HH:mm')} 퇴실 확인` };
+        if (lastAtt) return { label: '휴식 중', color: 'bg-ios-amber text-white', sub: '다음 학습 세션을 기다리는 중입니다.' };
     }
 
     return { label: '학습 대기', color: 'bg-ios-indigo text-white', sub: '첫 세션 시작 전입니다.' };
@@ -155,6 +156,14 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
           setWeeklyData(dataMap);
       }
 
+      // Fetch Exceptions (Holidays)
+      const { data: exData } = await supabase
+        .from('operation_exceptions')
+        .select('*')
+        .gte('exception_date', format(start, 'yyyy-MM-dd'))
+        .lte('exception_date', format(end, 'yyyy-MM-dd'));
+      setExceptions(exData || []);
+
       // 3. Timing/Sessions
       const { data: allSessions } = await supabase.from('sessions').select('*').order('start_time');
       if (allSessions) {
@@ -165,7 +174,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         
         setTodayData({
           bookings: bookings || [],
-          attendance: bookings?.flatMap(b => b.attendance) || [],
+          attendance: bookings?.flatMap(b => b.attendance).filter(Boolean) || [],
           currentSession: current,
           nextSession: next
         });
@@ -340,7 +349,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                     const isCur = isSameDay(day, new Date());
                     
                     let bgClass = isCur 
-                        ? 'bg-[#1C1C1E] text-white shadow-md' 
+                        ? 'bg-ios-indigo text-white shadow-md' 
                         : 'bg-white border border-gray-100 text-gray-300';
 
                     if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
@@ -353,16 +362,24 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                         bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
                     }
                     
+                    const isWeekend = i === 5 || i === 6;
+                    const isHoliday = exceptions.some(ex => ex.date === dateStr);
+
+                    let labelColor = 'text-gray-300';
+                    if (isCur) labelColor = 'text-ios-indigo';
+                    else if (isHoliday || isWeekend) labelColor = 'text-ios-rose/40';
+                    else if (dayData && dayData.bookings.length > 0) labelColor = 'text-ios-indigo';
+
                     return (
                         <div 
                             key={i} 
                             className={`flex flex-col items-center gap-1.5 ${dayData ? 'cursor-pointer' : ''}`}
                             onClick={() => dayData && setManageDate(day)}
                         >
-                            <span className={`text-[11px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
+                            <span className={`text-[11px] font-black ${labelColor}`}>
                                 {['월','화','수','목','금','토','일'][i]}
                             </span>
-                            <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-black transition-all ${bgClass}`}>
+                            <div className={`w-7 h-7 rounded-ios flex items-center justify-center text-[11px] font-black transition-all ${bgClass}`}>
                                 {format(day, 'd')}
                             </div>
                             <div className="h-3 flex items-center justify-center">
@@ -470,15 +487,22 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
                     <div className="space-y-4 mb-4 max-h-[50vh] overflow-y-auto scrollbar-hide">
                         {sortedBookings.length > 0 ? sortedBookings.map((b, i) => {
+                            const now = new Date();
+                            const isToday = dateStr === format(now, 'yyyy-MM-dd');
+                            const currentTime = format(now, 'HH:mm:ss');
+                            const sessionEndTime = b.sessions?.end_time;
+
                             const att = b.attendance?.[0] || b.attendance; 
                             const attObj = Array.isArray(att) ? att[0] : att;
+                            const isPastSession = isToday && sessionEndTime && currentTime > sessionEndTime;
                             
                             const statusLabel = attObj 
                                 ? (attObj.status === 'present' ? '출석' : attObj.status === 'late' ? '지각' : '결석')
-                                : '대기';
+                                : (isPastSession ? '결석' : '대기');
+
                             const statusColor = attObj
                                 ? (attObj.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : attObj.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : 'text-ios-rose bg-ios-rose/10')
-                                : 'text-gray-400 bg-gray-50';
+                                : (isPastSession ? 'text-ios-rose bg-ios-rose/10' : 'text-gray-400 bg-gray-50');
 
                             return (
                                 <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
@@ -498,10 +522,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
-                                            {b.seats?.zones?.name || ''} {b.seats?.zone_name || ''}
+                                            {b.seats?.zones?.name || ''}
                                         </p>
                                         <p className="text-xs font-black text-ios-indigo">
-                                            {b.seat_number || b.seats?.seat_number || '-'}번 좌석
+                                            {b.seats?.zone_name ? `${b.seats.zone_name}-` : ''}{b.seat_number || b.seats?.seat_number || '-'} 좌석
                                         </p>
                                         {attObj?.timestamp_in && (
                                             <p className="text-[10px] text-ios-gray font-bold mt-1">

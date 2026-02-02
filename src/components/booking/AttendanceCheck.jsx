@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { MapPin, ShieldCheck, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { format, addMinutes, subMinutes, isBefore, isAfter, parse } from 'date-fns';
 
-const AttendanceCheck = ({ user }) => {
+const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
   const [status, setStatus] = useState('idle'); // idle, locating, verified, error, done
   const [message, setMessage] = useState('');
   const [activeSession, setActiveSession] = useState(null);
@@ -24,7 +24,7 @@ const AttendanceCheck = ({ user }) => {
     
     return sessions.find(s => {
       const startTime = parse(`${todayStr} ${s.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
-      const windowStart = subMinutes(startTime, 5);
+      const windowStart = subMinutes(startTime, 10);
       const windowEnd = addMinutes(startTime, 30);
       
       return isAfter(now, windowStart) && isBefore(now, windowEnd);
@@ -54,9 +54,54 @@ const AttendanceCheck = ({ user }) => {
     return () => clearInterval(timer);
   }, [findActiveWindowSession]);
 
-  const verifyLocation = async () => {
-    if (!activeSession) return;
+// Inside AttendanceCheck component
+  // 1. Logic for button modes
+  const [isWithin10MinOfNext, setIsWithin10MinOfNext] = useState(false);
+  const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
 
+  useEffect(() => {
+    const checkStatus = async () => {
+        if (!user) return;
+        const now = new Date();
+        const todayStr = format(now, 'yyyy-MM-dd');
+        
+        // Check if user has ANY active attendance for current or next session
+        const { data: allSessions } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+        
+        if (allSessions) {
+            const currentTime = format(now, 'HH:mm:ss');
+            const active = allSessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+            const next = allSessions.find(s => s.start_time > currentTime);
+
+            // Time check for 10min window
+            if (next) {
+                const nextStart = parse(`${todayStr} ${next.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+                const diff = (nextStart.getTime() - now.getTime()) / (1000 * 60);
+                setIsWithin10MinOfNext(diff >= 0 && diff <= 10);
+            } else {
+                setIsWithin10MinOfNext(false);
+            }
+
+            // Attendance check
+            const targetSession = active || next;
+            if (targetSession) {
+                const { data: att } = await supabase
+                    .from('bookings')
+                    .select('attendance(timestamp_in)')
+                    .eq('user_id', user.id)
+                    .eq('date', todayStr)
+                    .eq('session_id', targetSession.id)
+                    .maybeSingle();
+                setHasCheckedInToday(!!att?.attendance?.[0]?.timestamp_in);
+            }
+        }
+    };
+    checkStatus();
+    const itv = setInterval(checkStatus, 30000);
+    return () => clearInterval(itv);
+  }, [user, activeSession]);
+
+  const handleAction = async (mode) => {
     setStatus('locating');
     setMessage('위치를 확인하고 있습니다...');
 
@@ -69,104 +114,69 @@ const AttendanceCheck = ({ user }) => {
     navigator.geolocation.getCurrentPosition(async (position) => {
       const { latitude, longitude, accuracy } = position.coords;
       
-      // 1. Fetch Global GPS Settings (Shared across all zones)
-      const { data: gpsData } = await supabase
-        .from('configs')
-        .select('value')
-        .eq('key', 'gps_settings')
-        .single();
-      
+      // 1. Fetch Global GPS Settings
+      const { data: gpsData } = await supabase.from('configs').select('value').eq('key', 'gps_settings').single();
       const gpsValue = gpsData?.value || {};
-      const targetPoints = gpsValue.points || [
-          { 
-            lat: gpsValue.lat || 37.5665, 
-            lng: gpsValue.lng || 126.9780, 
-            name: '기본 지점' 
-          }
-      ];
+      const targetPoints = gpsValue.points || [{ lat: gpsValue.lat || 37.5665, lng: gpsValue.lng || 126.9780, name: '기본 지점' }];
       const targetRadius = gpsValue.radius || 100;
 
       // 2. Verify Distance
       let isWithinRange = false;
       let minDistance = Infinity;
-      let nearestPointBox = null;
-      const R = 6371e3; // metres
+      const R = 6371e3;
 
       targetPoints.forEach(point => {
           const φ1 = latitude * Math.PI/180;
           const φ2 = point.lat * Math.PI/180;
           const Δφ = (point.lat-latitude) * Math.PI/180;
           const Δλ = (point.lng-longitude) * Math.PI/180;
-
-          const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                    Math.cos(φ1) * Math.cos(φ2) *
-                    Math.sin(Δλ/2) * Math.sin(Δλ/2);
+          const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
           const d = R * c;
-
-          if (d < minDistance) {
-              minDistance = d;
-              nearestPointBox = point;
-          }
-          if (d <= targetRadius) {
-              isWithinRange = true;
-          }
+          if (d < minDistance) minDistance = d;
+          if (d <= targetRadius) isWithinRange = true;
       });
 
-      if (isWithinRange) {
-        setStatus('verified');
-        try {
-          const today = format(new Date(), 'yyyy-MM-dd');
-          
-          // Check booking
-          const { data: booking, error: bookingError } = await supabase
-            .from('bookings')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('date', today)
-            .eq('session_id', activeSession.id)
-            .maybeSingle();
-
-          if (bookingError || !booking) {
-            setMessage(`현재 '${activeSession.name}'에 예약된 내역이 없습니다.`);
-            setStatus('error');
-            return;
-          }
-
-          // Calculate Late status (Start + 10min)
-          const startTime = parse(`${today} ${activeSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
-          const lateCutoff = addMinutes(startTime, 10);
-          
-          const now = new Date();
-          const finalStatus = isAfter(now, lateCutoff) ? 'late' : 'present';
-          const nowKSTISO = getKSTISOString();
-
-          const { error: attError } = await supabase
-            .from('attendance')
-            .upsert({
-              booking_id: booking.id,
-              status: finalStatus,
-              timestamp_in: nowKSTISO,
-              updated_at: new Date().toISOString()
-            }, { onConflict: 'booking_id' });
-
-          if (attError) throw attError;
-
-          setMessage(`'${activeSession.name}' 출석 체크가 완료되었습니다! (${finalStatus === 'late' ? '지각' : '출석'})`);
-          setTimeout(() => setStatus('done'), 1500);
-
-        } catch (err) {
-          console.error(err);
-          setMessage('출석 처리 중 오류가 발생했습니다.');
-          setStatus('error');
-        }
-      } else {
+      if (!isWithinRange) {
         setStatus('error');
         if (accuracy > 1000) {
           setMessage(`위치 정보가 부정확합니다. 스마트폰 GPS를 켜주세요.`);
         } else {
-          setMessage(`허용 구역 밖입니다. (${Math.round(minDistance)}m 차이)`);
+          setMessage(`외부에서는 처리할 수 없습니다. (${Math.round(minDistance)}m 차이)`);
         }
+        return;
+      }
+
+      try {
+          const today = format(new Date(), 'yyyy-MM-dd');
+          const nowKSTISO = getKSTISOString();
+          
+          let targetSession = activeSession;
+          if (!targetSession) {
+              const { data: allSess } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+              const curTime = format(new Date(), 'HH:mm:ss');
+              targetSession = allSess.find(s => s.start_time > curTime);
+          }
+
+          if (!targetSession) throw new Error('세션 정보를 찾을 수 없습니다.');
+
+          const { data: booking } = await supabase.from('bookings').select('id').eq('user_id', user.id).eq('date', today).eq('session_id', targetSession.id).maybeSingle();
+          if (!booking) throw new Error(`'${targetSession.name}' 예약 내역이 없습니다.`);
+
+          if (mode === 'attendance') {
+              const startTime = parse(`${today} ${targetSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+              const finalStatus = isAfter(new Date(), addMinutes(startTime, 10)) ? 'late' : 'present';
+              await supabase.from('attendance').upsert({ booking_id: booking.id, status: finalStatus, timestamp_in: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
+              setMessage(`'${targetSession.name}' 출석 완료!`);
+          } else { // mode === 'leave'
+              await supabase.from('attendance').upsert({ booking_id: booking.id, status: 'early_leave', timestamp_out: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
+              setMessage(`'${targetSession.name}' 조퇴/퇴실 완료!`);
+          }
+          setStatus('done');
+          if (onSuccess) setTimeout(onSuccess, 1500);
+      } catch (err) {
+          setMessage(err.message || '오류가 발생했습니다.');
+          setStatus('error');
       }
     }, (error) => {
       setStatus('error');
@@ -174,12 +184,8 @@ const AttendanceCheck = ({ user }) => {
     }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
   };
 
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
-  const windowInfo = activeSession ? {
-    start: format(subMinutes(parse(`${todayStr} ${activeSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date()), 5), 'HH:mm'),
-    end: format(addMinutes(parse(`${todayStr} ${activeSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date()), 30), 'HH:mm'),
-    lateLimit: format(addMinutes(parse(`${todayStr} ${activeSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date()), 10), 'HH:mm')
-  } : null;
+  const showAttendanceBtn = activeSession || isWithin10MinOfNext;
+  const showEarlyLeaveBtn = isEarlyLeaveMode || (isWithin10MinOfNext && !activeSession) || hasCheckedInToday;
 
   return (
     <div className="bg-white p-8 max-w-[360px] w-full text-center space-y-6 relative overflow-hidden rounded-[32px] shadow-2xl border border-gray-50 animate-spring-up">
@@ -198,33 +204,23 @@ const AttendanceCheck = ({ user }) => {
       </div>
 
       <div className="space-y-4">
-        {activeSession ? (
-          <>
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-ios-indigo/5 text-ios-indigo rounded-full text-[11px] font-black border border-ios-indigo/10">
-                <Clock className="w-3.5 h-3.5" />
-                현재 '{activeSession.name}' 출석 인증 가능
-            </div>
-            <h3 className="text-[26px] font-black tracking-tight text-[#1C1C1E] leading-tight">
-                {status === 'done' ? '인증 완료' : status === 'locating' ? '위치 확인 중' : '자기 주도 출석'}
-            </h3>
-            <div className="bg-white rounded-2xl p-4 space-y-1.5 border border-gray-100 shadow-sm">
-                <p className="text-[13px] font-bold text-ios-gray">인증 가능 시간: {windowInfo.start} ~ {windowInfo.end}</p>
-                <p className="text-[11px] font-black text-ios-rose/80">※ {windowInfo.lateLimit} 이후 인증 시 지각 처리됩니다.</p>
-            </div>
-          </>
-        ) : (
-          <>
-            <h3 className="text-2xl font-black tracking-tight text-[#1C1C1E]">
-                인증 가능한 세션 없음
-            </h3>
-            <p className="text-sm font-bold text-ios-gray leading-relaxed px-4">
-                {loadingSession ? '세션 정보를 불러오고 있습니다...' : '현재 출석 인증 가능 시간이 아닙니다. 시작 5분 전부터 30분 후까지만 가능합니다.'}
-            </p>
-          </>
-        )}
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-black border ${
+            hasCheckedInToday ? 'bg-ios-rose/5 text-ios-rose border-ios-rose/10' : 'bg-ios-indigo/5 text-ios-indigo border-ios-indigo/10'
+        }`}>
+            <Clock className="w-3.5 h-3.5" />
+            {hasCheckedInToday ? '현재 세션 입실 중' : (activeSession ? `'${activeSession.name}' 진행 중` : '세션 대기 중')}
+        </div>
+        
+        <h3 className="text-[26px] font-black tracking-tight text-[#1C1C1E] leading-tight">
+            {status === 'done' ? '완료되었습니다' : status === 'locating' ? '위치 확인 중' : '출석 및 조퇴 확인'}
+        </h3>
+        
+        <p className="text-sm font-bold text-ios-gray leading-relaxed px-4">
+            {status === 'done' ? '정상적으로 처리되었습니다.' : '원하시는 작업을 선택해주세요.'}
+        </p>
       </div>
 
-      <div className="space-y-4 pt-2">
+      <div className="space-y-3 pt-2">
           {message && (
               <p className={`text-[12px] font-black p-3.5 rounded-apple-md ${status === 'error' ? 'bg-ios-rose/5 text-ios-rose border border-ios-rose/10' : 'bg-ios-emerald/5 text-ios-emerald border border-ios-emerald/10'}`}>
                   {message}
@@ -232,17 +228,37 @@ const AttendanceCheck = ({ user }) => {
           )}
 
           {status !== 'done' && (
-            <button 
-              onClick={verifyLocation}
-              disabled={status === 'locating' || !activeSession}
-              className={`w-full py-[24px] rounded-3xl font-black text-[18px] transition-all shadow-xl ios-tap border ${
-                status === 'locating' || !activeSession ? 'bg-white text-gray-300 border-gray-100 shadow-none' :
-                status === 'error' ? 'bg-[#1C1C1E] text-white border-transparent' :
-                'bg-ios-blue text-white border-transparent shadow-blue-500/20'
-              }`}
-            >
-              {status === 'locating' ? '인증 진행 중...' : activeSession ? `${activeSession.name} 출석 인증하기` : '인증 불가'}
-            </button>
+            <>
+                {/* 1. Attendance Button: Only if a session is active or starting soon AND not yet checked in */}
+                {showAttendanceBtn && !hasCheckedInToday && (
+                    <button 
+                        onClick={() => handleAction('attendance')}
+                        disabled={status === 'locating'}
+                        className="w-full py-[20px] bg-ios-indigo text-white rounded-3xl font-black text-[17px] shadow-lg shadow-indigo-500/20 transition-all active:scale-[0.98] ios-tap"
+                    >
+                        {activeSession ? `${activeSession.name} 출석 인증` : '다음 세션 출석 인증'}
+                    </button>
+                )}
+
+                {/* 2. Early Leave Button: Always available in early leave mode OR during break pre-session */}
+                {(showEarlyLeaveBtn || hasCheckedInToday) && (
+                    <button 
+                        onClick={() => handleAction('leave')}
+                        disabled={status === 'locating'}
+                        className={`w-full py-[20px] rounded-3xl font-black text-[17px] transition-all active:scale-[0.98] ios-tap ${
+                            hasCheckedInToday ? 'bg-ios-rose text-white shadow-xl shadow-red-500/20' : 'bg-ios-rose/10 text-ios-rose border border-ios-rose/20'
+                        }`}
+                    >
+                        {hasCheckedInToday ? '지금 조퇴하기' : '미리 퇴실 신청'}
+                    </button>
+                )}
+                
+                {!showAttendanceBtn && !showEarlyLeaveBtn && !hasCheckedInToday && (
+                    <div className="bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-200">
+                         <p className="text-xs font-bold text-gray-400">현재 인증 가능한 시간이 아닙니다.</p>
+                    </div>
+                )}
+            </>
           )}
       </div>
     </div>

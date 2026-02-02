@@ -174,7 +174,7 @@ const UserProfile = ({ user }) => {
                 <div 
                    key={idx}
                    className={`aspect-square rounded-ios flex items-center justify-center text-[12px] font-black transition-all duration-500 ios-tap relative group ${
-                    isSelected ? 'bg-[#1C1C1E] text-white shadow-xl scale-[1.15] z-10' :
+                    isSelected ? 'bg-ios-indigo text-white shadow-xl scale-[1.15] z-10' :
                     status === 'present' ? 'bg-ios-emerald/10 text-ios-emerald' :
                     status === 'late' ? 'bg-ios-amber/10 text-ios-amber' :
                     status === 'absent' ? 'bg-ios-rose/10 text-ios-rose' :
@@ -332,7 +332,7 @@ const UserProfile = ({ user }) => {
 
                 <button 
                     onClick={() => setShowLeaderboard(false)}
-                    className="w-full mt-6 py-4 bg-[#1C1C1E] text-white rounded-ios font-black text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg"
+                    className="w-full mt-6 py-4 bg-ios-indigo text-white rounded-ios font-black text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg"
                 >
                     닫기
                 </button>

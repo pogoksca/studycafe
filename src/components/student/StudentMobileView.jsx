@@ -7,112 +7,147 @@ import {
 import StudentBookingMobileWizard from './StudentBookingMobileWizard';
 import AttendanceCheck from '../booking/AttendanceCheck';
 import UserProfile from '../profile/UserProfile';
-import { format, startOfWeek, endOfWeek, eachDayOfInterval, isToday, addWeeks, subWeeks, isSameDay } from 'date-fns';
+import { format, startOfWeek, endOfWeek, eachDayOfInterval, isToday, addWeeks, subWeeks, isSameDay, parse } from 'date-fns';
 import { ko } from 'date-fns/locale';
 
 const StudentMobileView = ({ onLogout, currentUser }) => {
   const [activeTab, setActiveTab] = useState('home'); // home, map, attendance, profile
   const [currentSession, setCurrentSession] = useState(null);
-  const [schoolName, setSchoolName] = useState(''); // Default name
+  const [nextSession, setNextSession] = useState(null);
+  const [schoolName, setSchoolName] = useState('');
   const [todayStudyPlan, setTodayStudyPlan] = useState('');
-  const [weeklyData, setWeeklyData] = useState({}); // { 'yyyy-MM-dd': { bookings: [], attendance: [] } }
-  const [currentDate, setCurrentDate] = useState(new Date()); // For calendar navigation
-  const [manageDate, setManageDate] = useState(null); // For detail modal
+  const [weeklyData, setWeeklyData] = useState({});
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [manageDate, setManageDate] = useState(null);
+  const [exceptions, setExceptions] = useState([]);
+  const [attendanceStatus, setAttendanceStatus] = useState(null); // { status, timestamp_in, timestamp_out }
   
-  // Fetch current session for header info
+  const fetchDashboardData = React.useCallback(async () => {
+    if (!currentUser) return;
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const end = endOfWeek(currentDate, { weekStartsOn: 1 });
+    
+    // 1. Fetch Today's Study Plan
+    const { data: plans } = await supabase
+        .from('study_plans')
+        .select('content')
+        .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
+        .eq('date', todayStr);
+        
+    if (plans && plans.length > 0) {
+        setTodayStudyPlan(plans.map(p => p.content).filter(Boolean).join('\n'));
+    } else {
+        setTodayStudyPlan('');
+    }
+
+    // 2. Weekly Bookings
+    const { data: bookings } = await supabase
+        .from('bookings')
+        .select(`
+            *,
+            sessions (id, name, start_time, end_time),
+            seats (id, seat_number, zone_name, zone_id, zones(name)),
+            attendance (id, booking_id, status, timestamp_in, timestamp_out)
+        `)
+        .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
+        .gte('date', format(start, 'yyyy-MM-dd'))
+        .lte('date', format(end, 'yyyy-MM-dd'));
+        
+    if (bookings) {
+        const dataMap = {};
+        bookings.forEach(b => {
+            const d = b.date;
+            if (!dataMap[d]) dataMap[d] = { bookings: [], attendance: [] };
+            dataMap[d].bookings.push(b);
+            if (b.attendance && b.attendance.length > 0) {
+                dataMap[d].attendance.push(...b.attendance);
+            }
+        });
+        setWeeklyData(dataMap);
+    }
+
+    // 3. Exceptions
+    const { data: exData } = await supabase
+        .from('operation_exceptions')
+        .select('*')
+        .gte('exception_date', format(start, 'yyyy-MM-dd'))
+        .lte('exception_date', format(end, 'yyyy-MM-dd'));
+    setExceptions(exData || []);
+  }, [currentUser, currentDate]);
+
+  const fetchSession = React.useCallback(async () => {
+    const { data: sessions } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+    if (sessions) {
+      const now = new Date();
+      const currentTime = format(now, 'HH:mm:00');
+      const active = sessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+      const next = sessions.find(s => s.start_time > currentTime);
+      setCurrentSession(active);
+      setNextSession(next);
+    }
+  }, []);
+
+  // Fetch initial data
   useEffect(() => {
-    const fetchSession = async () => {
-      const { data: sessions } = await supabase.from('sessions').select('*');
-      if (sessions) {
-        const now = new Date();
-        const currentTime = now.getHours().toString().padStart(2, '0') + ':' + 
-                           now.getMinutes().toString().padStart(2, '0') + ':00';
-        const active = sessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
-        setCurrentSession(active);
-      }
-    };
-
     const fetchSchoolInfo = async () => {
-        const { data } = await supabase
-            .from('configs')
-            .select('value')
-            .eq('key', 'school_info')
-            .single();
-        
-        if (data?.value?.name_en) {
-            setSchoolName(data.value.name_en);
-        }
-    };
-
-    const fetchDashboardData = async () => {
-        if (!currentUser) return;
-        const todayStr = format(new Date(), 'yyyy-MM-dd'); // Always real today for study plan
-        
-        // For Dashboard Calendar: Use currentDate
-        const start = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday start
-        const end = endOfWeek(currentDate, { weekStartsOn: 1 });
-        
-        // 1. Fetch Today's Study Plan (Actual Today)
-        const { data: plans } = await supabase
-            .from('study_plans')
-            .select('content')
-            .eq('user_id', currentUser.id)
-            .eq('date', todayStr);
-            
-        if (plans && plans.length > 0) {
-            const combined = plans.map(p => p.content).filter(Boolean).join('\n');
-            setTodayStudyPlan(combined);
-        } else {
-            setTodayStudyPlan('');
-        }
-
-        // 2. Fetch Weekly Bookings with Session and Attendance
-        const { data: bookings } = await supabase
-            .from('bookings')
-            .select(`
-                *,
-                sessions (
-                    id,
-                    name,
-                    start_time,
-                    end_time
-                ),
-                seats (id, seat_number, zone_name, zone_id, zones(name)),
-                attendance (
-                    id,
-                    booking_id,
-                    status,
-                    timestamp_in,
-                    timestamp_out
-                )
-            `)
-            .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
-            .gte('date', format(start, 'yyyy-MM-dd'))
-            .lte('date', format(end, 'yyyy-MM-dd'));
-            
-        if (bookings) {
-            const dataMap = {};
-            bookings.forEach(b => {
-                const d = b.date;
-                if (!dataMap[d]) dataMap[d] = { bookings: [], attendance: [] };
-                dataMap[d].bookings.push(b);
-                if (b.attendance && b.attendance.length > 0) {
-                    dataMap[d].attendance.push(...b.attendance);
-                }
-            });
-            setWeeklyData(dataMap);
-        }
+        const { data } = await supabase.from('configs').select('value').eq('key', 'school_info').single();
+        if (data?.value?.name_en) setSchoolName(data.value.name_en);
     };
 
     fetchSession();
     fetchSchoolInfo();
     fetchDashboardData();
+
     const interval = setInterval(() => {
         fetchSession();
-        fetchDashboardData(); // Refresh dashboard periodically
+        fetchDashboardData();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [fetchSession, fetchDashboardData]);
+
+  // Separate Effect to sync Attendance Status
+  useEffect(() => {
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayData = weeklyData[todayStr];
+    if (!todayData) {
+        setAttendanceStatus(null);
+        return;
+    }
+
+    const todayBookings = todayData.bookings || [];
+    const todayAttendance = todayData.attendance || [];
+    
+    if (currentSession) {
+        const currentBooking = todayBookings.find(b => b.session_id === currentSession.id);
+        const att = todayAttendance.find(a => a.booking_id === currentBooking?.id);
+        setAttendanceStatus(att || null);
+    } else if (nextSession) {
+        const nextBooking = todayBookings.find(b => b.session_id === nextSession.id);
+        const att = todayAttendance.find(a => a.booking_id === nextBooking?.id);
+        setAttendanceStatus(att || null);
+    } else {
+        setAttendanceStatus(null);
+    }
+  }, [weeklyData, currentSession, nextSession]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+        const fetchSess = async () => {
+             const { data: sessions } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+             if (sessions) {
+               const now = new Date();
+               const currentTime = format(now, 'HH:mm:00');
+               const active = sessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+               const next = sessions.find(s => s.start_time > currentTime);
+               setCurrentSession(active);
+               setNextSession(next);
+             }
+        };
+        fetchSess();
     }, 60000); 
     return () => clearInterval(interval);
-  }, [currentUser, currentDate]); // Refresh when user or date changes
+  }, []);
 
   const handlePrevWeek = () => setCurrentDate(prev => subWeeks(prev, 1));
   const handleNextWeek = () => setCurrentDate(prev => addWeeks(prev, 1));
@@ -234,7 +269,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                             const isCur = isSameDay(day, new Date()); // Check against real today
                             
                             let bgClass = isCur 
-                                ? 'bg-[#1C1C1E] text-white shadow-lg ring-4 ring-white z-10' 
+                                ? 'bg-ios-indigo text-white shadow-lg ring-4 ring-white z-10' 
                                 : 'bg-white/50 border border-white/40 text-gray-300';
                             
                             if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
@@ -247,16 +282,24 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                                 bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
                             }
 
+                            const isWeekend = i === 5 || i === 6; // Sat, Sun (i is 0-indexed from Mon)
+                            const isHoliday = exceptions.some(ex => ex.date === dateStr);
+                            
+                            let labelColor = 'text-gray-300';
+                            if (isCur) labelColor = 'text-ios-indigo';
+                            else if (isHoliday || isWeekend) labelColor = 'text-ios-rose/40';
+                            else if (dayData && dayData.bookings.length > 0) labelColor = 'text-ios-indigo';
+
                             return (
                                 <div 
                                     key={i} 
                                     className={`flex flex-col items-center gap-2 ${dayData ? 'cursor-pointer' : ''}`}
                                     onClick={() => dayData && setManageDate(day)}
                                 >
-                                    <span className={`text-[9px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
+                                    <span className={`text-[9px] font-black ${labelColor}`}>
                                         {['월','화','수','목','금','토','일'][i]}
                                     </span>
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ios-tap ${bgClass}`}>
+                                    <div className={`w-8 h-8 rounded-ios flex items-center justify-center text-[10px] font-black transition-all ios-tap ${bgClass}`}>
                                         {format(day, 'd')}
                                     </div>
                                     <div className="h-4 flex items-center justify-center">
@@ -286,24 +329,64 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                </div>
                <div className="text-left space-y-1 relative z-10 flex-1">
                  <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">예약하기</h2>
-                 <p className="text-xs font-bold text-ios-gray">원하는 좌석을 선택하세요</p>
+                 <p className="text-xs font-bold text-ios-gray">새로운 예약 및 기존 예약 수정시 선택하세요</p>
                </div>
                <ChevronRight className="w-5 h-5 text-gray-300" />
              </button>
 
-            {/* 2. Attendance Button */}
-             <button 
-               onClick={() => setActiveTab('attendance')}
-               className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
-             >
-               <div className="absolute inset-0 bg-gradient-to-br from-ios-emerald/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-               <div className="w-14 h-14 rounded-full bg-ios-emerald/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
-                 <MapPin className="w-7 h-7 text-ios-emerald" />
-               </div>
-               <div className="text-left space-y-1 relative z-10 flex-1">
-                 <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">출석인증</h2>
-                 <p className="text-xs font-bold text-ios-gray">GPS로 간편하게 인증하세요</p>
-               </div>
+            {/* 2. Attendance/Early Leave Button */}
+            <button 
+              onClick={() => setActiveTab('attendance')}
+              className="flex-1 bg-white rounded-apple border border-gray-100 shadow-sm p-4 flex items-center justify-center gap-6 group transition-all active:scale-[0.98] relative overflow-hidden ios-tap"
+            >
+               {(() => {
+                 const now = new Date();
+                 const isWithin10MinOfNext = nextSession && (() => {
+                    const todayStr = format(now, 'yyyy-MM-dd');
+                    const nextStart = parse(`${todayStr} ${nextSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+                    const diff = (nextStart.getTime() - now.getTime()) / (1000 * 60);
+                    return diff >= 0 && diff <= 10;
+                 })();
+                 
+                 // Logic: 
+                 // 1. If in session + checked in -> Early Leave
+                 // 2. If NO session + next session exists:
+                 //    - Within 10 min window -> Attendance (Primary, but inside has both)
+                 //    - Longer gap -> Early Leave (allow going home early)
+                 // 3. Else -> Attendance
+                 const shouldShowEarlyLeave = (currentSession && attendanceStatus?.timestamp_in) || 
+                                              (!currentSession && nextSession && !isWithin10MinOfNext);
+
+                 if (shouldShowEarlyLeave) {
+                   return (
+                    <>
+                      <div className="absolute inset-0 bg-gradient-to-br from-ios-rose/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="w-14 h-14 rounded-full bg-ios-rose/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                        <LogOut className="w-7 h-7 text-ios-rose" />
+                      </div>
+                      <div className="text-left space-y-1 relative z-10 flex-1">
+                        <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">조퇴신청</h2>
+                        <p className="text-xs font-bold text-ios-gray">
+                            {!currentSession ? '다음 세션 시작 전 퇴실 처리' : '현재 세션 도중 조퇴 처리'}
+                        </p>
+                      </div>
+                    </>
+                   );
+                 } else {
+                   return (
+                    <>
+                      <div className="absolute inset-0 bg-gradient-to-br from-ios-emerald/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <div className="w-14 h-14 rounded-full bg-ios-emerald/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+                        <MapPin className="w-7 h-7 text-ios-emerald" />
+                      </div>
+                      <div className="text-left space-y-1 relative z-10 flex-1">
+                        <h2 className="text-xl font-black text-[#1C1C1E] tracking-tight">출석인증</h2>
+                        <p className="text-xs font-bold text-ios-gray">GPS로 간편하게 인증하세요</p>
+                      </div>
+                    </>
+                   );
+                 }
+               })()}
                <ChevronRight className="w-5 h-5 text-gray-300" />
              </button>
 
@@ -320,10 +403,28 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
             </div>
         );
       case 'attendance':
+        const now = new Date();
+        const isWithin10MinOfNext = nextSession && (() => {
+            const todayStr = format(now, 'yyyy-MM-dd');
+            const nextStart = parse(`${todayStr} ${nextSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+            const diff = (nextStart.getTime() - now.getTime()) / (1000 * 60);
+            return diff >= 0 && diff <= 10;
+        })();
+
+        // Prop for AttendanceCheck: It should know if it's generally in an "early leave allowed" state
+        const isEarlyLeaveAllowed = (currentSession && attendanceStatus?.timestamp_in) || (!currentSession && nextSession);
+        
         return (
             <div className="flex-1 bg-white flex flex-col items-center justify-center overflow-y-auto scrollbar-hide px-6">
                 <div className="w-full max-w-lg py-8 flex flex-col items-center justify-center">
-                    <AttendanceCheck user={currentUser} />
+                    <AttendanceCheck 
+                        user={currentUser} 
+                        isEarlyLeaveMode={isEarlyLeaveAllowed}
+                        onSuccess={() => {
+                            fetchDashboardData();
+                            setActiveTab('home');
+                        }}
+                    />
                 </div>
             </div>
         );
@@ -368,13 +469,21 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
 
                     <div className="space-y-4 mb-4 max-h-[50vh] overflow-y-auto scrollbar-hide">
                         {sortedBookings.length > 0 ? sortedBookings.map((b, i) => {
+                            const now = new Date();
+                            const isToday = dateStr === format(now, 'yyyy-MM-dd');
+                            const currentTime = format(now, 'HH:mm:ss');
+                            const sessionEndTime = b.sessions?.end_time;
+
                             const att = b.attendance?.[0];
+                            const isPastSession = isToday && sessionEndTime && currentTime > sessionEndTime;
+
                             const statusLabel = att 
                                 ? (att.status === 'present' ? '출석' : att.status === 'late' ? '지각' : '결석')
-                                : '대기';
+                                : (isPastSession ? '결석' : '대기');
+
                             const statusColor = att
                                 ? (att.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : att.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : 'text-ios-rose bg-ios-rose/10')
-                                : 'text-gray-400 bg-gray-50';
+                                : (isPastSession ? 'text-ios-rose bg-ios-rose/10' : 'text-gray-400 bg-gray-50');
 
                             return (
                                 <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
@@ -394,10 +503,10 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                                     </div>
                                     <div className="text-right">
                                         <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
-                                            {b.seats?.zones?.name || ''} {b.seats?.zone_name || ''}
+                                            {b.seats?.zones?.name || ''}
                                         </p>
                                         <p className="text-xs font-black text-ios-indigo">
-                                            {b.seat_number || b.seats?.seat_number || '-'}번 좌석
+                                            {b.seats?.zone_name ? `${b.seats.zone_name}-` : ''}{b.seat_number || b.seats?.seat_number || '-'} 좌석
                                         </p>
                                         {att?.timestamp_in && (
                                             <p className="text-[10px] text-ios-gray font-bold mt-1">
@@ -452,8 +561,6 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
       </main>
 
       {/* Bottom Navigation */}
-      {/* Hide bottom nav when in wizard logic if needed, but keeping it allows quick exit */}
-      {activeTab !== 'map' && (
       <nav className="flex-none glass-material pb-[calc(0.4rem+env(safe-area-inset-bottom,0px))] pt-2 px-6 flex justify-between items-center z-50 shadow-[0_-4px_40px_rgba(0,0,0,0.03)] border-t border-white/40">
         {[
           { id: 'home', icon: Home, label: '홈' },
@@ -477,7 +584,6 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
           </button>
         ))}
       </nav>
-      )}
       {renderDayDetailModal()}
     </div>
   );

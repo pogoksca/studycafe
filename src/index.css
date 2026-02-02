@@ -4,23 +4,23 @@
 
 :root {
   /* iOS-inspired Modern Light Theme - System Colors */
-  --ios-blue: #007AFF;
-  --ios-indigo: #5856D6;
-  --ios-emerald: #34C759;
-  --ios-rose: #FF3B30;
-  --ios-amber: #FF9500;
-  --ios-teal: #30B0C7;
-  --ios-gray: #8E8E93;
-  --ios-gray-2: #AEAEB2;
-  --ios-gray-3: #C7C7CC;
-  --ios-gray-4: #D1D1D6;
-  --ios-gray-5: #E5E5EA;
-  --ios-gray-6: #F2F2F7;
-  
-  --ios-bg: #F2F2F7;
+  --ios-blue: #007aff;
+  --ios-indigo: #5856d6;
+  --ios-emerald: #34c759;
+  --ios-rose: #ff3b30;
+  --ios-amber: #ff9500;
+  --ios-teal: #30b0c7;
+  --ios-gray: #8e8e93;
+  --ios-gray-2: #aeaeb2;
+  --ios-gray-3: #c7c7cc;
+  --ios-gray-4: #d1d1d6;
+  --ios-gray-5: #e5e5ea;
+  --ios-gray-6: #f2f2f7;
+
+  --ios-bg: #f2f2f7;
   --ios-card-bg: rgba(255, 255, 255, 0.82);
   --ios-glass-bg: rgba(255, 255, 255, 0.7);
-  
+
   /* Continuous Curvature (Squircle Idea) */
   --radius-xl: 32px;
   --radius-lg: 20px;
@@ -35,13 +35,23 @@
 }
 
 body {
-  @apply bg-[#F2F2F7] text-[#1C1C1E] min-h-screen selection:bg-indigo-500/10;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  @apply bg-[#f2f2f7] text-[#1c1c1e] min-h-screen selection:bg-indigo-500/10;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
   letter-spacing: -0.015em;
   -webkit-font-smoothing: antialiased;
-  background-image: 
-    radial-gradient(circle at 10% 10%, rgba(88, 86, 214, 0.05) 0%, transparent 50%),
-    radial-gradient(circle at 90% 90%, rgba(0, 122, 255, 0.05) 0%, transparent 50%);
+  background-image:
+    radial-gradient(
+      circle at 10% 10%,
+      rgba(88, 86, 214, 0.05) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+    circle at 90% 90%,
+    rgba(0, 122, 255, 0.05) 0%,
+    transparent 50%
+  );
 }
 
 /* Glassmorphism Materials */
@@ -50,16 +60,18 @@ body {
 }
 
 .glass-header {
-  @apply sticky top-0 z-[100] backdrop-blur-3xl saturate-[180%] bg-white/70 border-b border-gray-200/30;
+  @apply sticky top-0 z-[100] backdrop-blur-3xl saturate-[180%] bg-white/70
+    border-b border-gray-200/30;
 }
 
 .glass-card {
-  @apply bg-white/85 backdrop-blur-xl border border-white/60 shadow-sm rounded-[20px];
+  @apply bg-white/85 backdrop-blur-xl border border-white/60 shadow-sm
+    rounded-[20px];
 }
 
 /* Typography Enhancements */
 .ios-title {
-  @apply text-3xl font-black tracking-tight leading-tight text-[#1C1C1E];
+  @apply text-3xl font-black tracking-tight leading-tight text-[#1c1c1e];
 }
 
 .ios-subtitle {
@@ -76,9 +88,18 @@ body {
 }
 
 /* Continuous Corners Utilities */
-.rounded-apple { border-radius: 20px; }
-.rounded-apple-lg { border-radius: 32px; }
-.rounded-apple-md { border-radius: 12px; }
+.rounded-apple {
+  border-radius: 20px;
+}
+.rounded-apple-lg {
+  border-radius: 32px;
+}
+.rounded-apple-md {
+  border-radius: 12px;
+}
+.rounded-ios {
+  border-radius: 12px;
+}
 
 /* Canvas Styling */
 .canvas-container {
@@ -89,8 +110,14 @@ body {
 
 /* Animations */
 @keyframes spring-up {
-  0% { transform: translateY(24px) scale(0.96); opacity: 0; }
-  100% { transform: translateY(0) scale(1); opacity: 1; }
+  0% {
+    transform: translateY(24px) scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
 }
 
 .animate-spring-up {
@@ -116,18 +143,18 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #E5E5EA; /* ios-gray-5 */
+  background: #e5e5ea; /* ios-gray-5 */
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #D1D1D6; /* ios-gray-4 */
+  background: #d1d1d6; /* ios-gray-4 */
 }
 
 /* Firefox support (simplified) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #E5E5EA transparent;
+  scrollbar-color: #e5e5ea transparent;
 }
 
 /* Print Utilities */
@@ -135,7 +162,7 @@ body {
   .no-print {
     display: none !important;
   }
-  
+
   body, html {
     margin: 0 !important;
     padding: 0 !important;

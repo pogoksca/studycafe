@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { 
   Calendar, Clock, MapPin, Armchair, BookOpen, Save, 
   ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, X,
-  ChevronUp, ChevronDown
+  ChevronUp, ChevronDown, Info
 } from 'lucide-react';
 import { format, addDays, subDays, isBefore, isAfter, parseISO, startOfDay, isSameDay, addMonths, subMonths } from 'date-fns';
 import { ko } from 'date-fns/locale';
@@ -28,6 +28,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   // Management State
   const [manageDate, setManageDate] = useState(null);
   const [dailyBookings, setDailyBookings] = useState({}); // { 'yyyy-MM-dd': [bookings...] }
+  const [editingBookingIds, setEditingBookingIds] = useState(null); // List of IDs being edited
 
   // Helper: Get clean seat number (strip section prefix)
   const getCleanSeatNumber = (seat) => {
@@ -309,8 +310,8 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             </div>
             
             <div className="grid grid-cols-7 gap-2">
-                {['일','월','화','수','목','금','토'].map(d => (
-                    <div key={d} className="text-center text-xs font-bold text-gray-400 py-2">{d}</div>
+                {['일','월','화','수','목','금','토'].map((d, i) => (
+                    <div key={d} className={`text-center text-xs font-bold py-2 ${i === 0 || i === 6 ? 'text-ios-rose' : 'text-gray-400'}`}>{d}</div>
                 ))}
                 
                 {calendarGrid.map((date, idx) => {
@@ -322,6 +323,9 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     const isSelected = selectedDate && isSameDay(date, selectedDate);
                     const dateStr = format(date, 'yyyy-MM-dd');
                     const activity = userActivities[dateStr];
+                    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                    const isException = operationExceptions.some(e => e.exception_date === dateStr);
+                    const isHoliday = isWeekend || isException;
                     
                     return (
                         <button
@@ -337,14 +341,14 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                             className={`
                                 aspect-square rounded-xl flex flex-col items-center justify-center text-sm font-bold transition-all relative
                                 ${isSelected 
-                                    ? 'bg-[#1C1C1E] text-white shadow-xl scale-105 z-10' 
+                                    ? 'bg-ios-indigo text-white shadow-xl scale-105 z-10' 
                                     : activity === 'present' ? 'bg-ios-emerald text-white border-none' :
                                       activity === 'late' ? 'bg-ios-amber text-white border-none' :
                                       activity === 'absent' ? 'bg-ios-rose text-white border-none' :
                                       activity === 'reserved' ? 'bg-ios-indigo text-white border-none' :
                                       available 
-                                        ? 'bg-white text-[#1C1C1E] border border-gray-100 hover:border-gray-300' 
-                                        : 'bg-transparent text-gray-400 cursor-not-allowed' 
+                                        ? `bg-white border border-gray-100 hover:border-gray-300 ${isHoliday ? 'text-ios-rose' : 'text-[#1C1C1E]'}` 
+                                        : `bg-transparent cursor-not-allowed ${isHoliday ? 'text-ios-rose/50' : 'text-gray-400'}` 
                                 }
                             `}
                         >
@@ -452,23 +456,32 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
       };
 
       const handleModify = async () => {
-          if (!confirm('예약을 수정하시겠습니까? 기존 예약은 취소되며, 새로운 예약을 진행합니다.')) return;
+          if (!confirm('학습 세션만 수정이 가능하며, 좌석은 수정하실 수 없습니다.\n좌석 변경을 원하실 경우, 기존 예약을 취소하신 후 다시 예약해 주시기 바랍니다.')) return;
           
           setLoading(true);
           try {
-               const bookingIds = bookingsForDate.map(b => b.id);
-               const { error } = await supabase.from('bookings').delete().in('id', bookingIds);
-               if (error) throw error;
-               
-               setSelectedDate(manageDate);
-               setSelectedSessionIds([]);
-               setSelectedZoneId(null);
-               setSelectedSeatNumber('');
-               setStudyContent('');
+                const bookingIds = bookingsForDate.map(b => b.id);
+                const first = bookingsForDate[0];
+                
+                // Set existing data to state
+                setSelectedDate(manageDate);
+                // Extract session IDs
+                setSelectedSessionIds(bookingsForDate.map(b => b.session_id));
+                
+                // Lock Zone and Seat
+                if (first && first.seats) {
+                    setSelectedZoneId(first.seats.zone_id);
+                    setSelectedSection(first.seats.zone_name || '일반');
+                    setSelectedSeatNumber(getCleanSeatNumber(first.seats));
+                }
+                
+                // Get study content (from plan if available, or just first booking)
+                setStudyContent(first.study_plans?.content || '');
 
-               setManageDate(null);
-               setCurrentStep(1); // Go to Session selection
-               
+                setEditingBookingIds(bookingIds);
+                setManageDate(null);
+                setCurrentStep(3); // Directly to Session selection
+                
           } catch (err) {
               console.error("Modify failed:", err);
               alert('예약 수정 준비 중 오류가 발생했습니다.');
@@ -491,28 +504,51 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                       </div>
 
                       <div className="space-y-4 mb-8 max-h-[50vh] overflow-y-auto scrollbar-hide">
-                          {bookingsForDate.length > 0 ? bookingsForDate.map((b, i) => (
-                              <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between">
-                                  <div>
-                                      <p className="text-sm font-black text-[#1C1C1E] mb-1">
-                                          {b.sessions?.name}
-                                      </p>
-                                      <p className="text-xs text-ios-gray font-bold">
-                                          {b.sessions?.start_time.slice(0,5)} ~ {b.sessions?.end_time.slice(0,5)}
-                                      </p>
-                                  </div>
-                                  <div className="text-right">
-                                      <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
-                                          {b.seats?.zones?.name || ''} {b.seats?.zone_name || ''}
+                          {bookingsForDate.length > 0 ? bookingsForDate.map((b, i) => {
+                            const now = new Date();
+                            const isToday = dateStr === format(now, 'yyyy-MM-dd');
+                            const currentTime = format(now, 'HH:mm:ss');
+                            const sessionEndTime = b.sessions?.end_time;
+
+                            const att = b.attendance?.[0];
+                            const isPastSession = isToday && sessionEndTime && currentTime > sessionEndTime;
+
+                            const statusLabel = att 
+                                ? (att.status === 'present' ? '출석' : att.status === 'late' ? '지각' : '결석')
+                                : (isPastSession ? '결석' : '대기');
+
+                            const statusColor = att
+                                ? (att.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : att.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : 'text-ios-rose bg-ios-rose/10')
+                                : (isPastSession ? 'text-ios-rose bg-ios-rose/10' : 'text-gray-400 bg-gray-50');
+
+                            return (
+                                <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <p className="text-sm font-black text-[#1C1C1E]">
+                                                {b.sessions?.name}
+                                            </p>
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statusColor}`}>
+                                                {statusLabel}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-ios-gray font-bold">
+                                            {b.sessions?.start_time.slice(0,5)} ~ {b.sessions?.end_time.slice(0,5)}
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
+                                          {b.seats?.zones?.name || ''}
                                       </p>
                                       <p className="text-xs font-black text-ios-indigo">
-                                          {b.seat_number || b.seats?.seat_number || '-'}번 좌석
+                                          {b.seats?.zone_name ? `${b.seats.zone_name}-` : ''}{b.seat_number || b.seats?.seat_number || '-'} 좌석
                                       </p>
-                                  </div>
-                              </div>
-                          )) : (
-                              <p className="text-center text-gray-400 text-sm">예약 정보가 없습니다.</p>
-                          )}
+                                    </div>
+                                </div>
+                            );
+                        }) : (
+                            <p className="text-center text-gray-400 text-sm">예약 정보가 없습니다.</p>
+                        )}
                       </div>
 
                       <div className="flex gap-3">
@@ -559,8 +595,29 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
 
      return (
         <div className="space-y-4 animate-fade-in">
-            <h3 className="text-xl font-black text-[#1C1C1E]">세션 선택</h3>
-            <p className="text-sm font-bold text-ios-gray">이용할 시간을 모두 선택해주세요.<br/>(복수 선택 가능)</p>
+            <div className="flex items-center justify-between">
+                <div>
+                   <h3 className="text-xl font-black text-[#1C1C1E]">세션 선택</h3>
+                   <p className="text-sm font-bold text-ios-gray">이용할 시간을 모두 선택해주세요.<br/>(복수 선택 가능)</p>
+                </div>
+                {editingBookingIds && (
+                    <div className="text-right">
+                        <span className="text-[10px] font-black text-ios-indigo bg-ios-indigo/10 px-2 py-1 rounded-full uppercase">수정 모드</span>
+                    </div>
+                )}
+            </div>
+
+            {editingBookingIds && (
+                <div className="p-3 bg-ios-indigo/5 border border-ios-indigo/10 rounded-xl flex items-start gap-3">
+                    <div className="mt-0.5">
+                        <Info className="w-4 h-4 text-ios-indigo" />
+                    </div>
+                    <p className="text-[11px] font-bold text-ios-indigo leading-tight">
+                        학습 세션만 수정이 가능하며, 좌석({selectedSection}-{selectedSeatNumber}번)은 고정됩니다. 좌석 변경을 원하실 경우 예약을 취소하신 후 다시 예약해 주시기 바랍니다.
+                    </p>
+                </div>
+            )}
+
             <div className="space-y-3 mt-4">
                 {operationalSessions.filter(session => {
                      // Filter based on selected Date and operatingRules
@@ -902,108 +959,78 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   };
 
   const handleNext = () => {
-      if (currentStep < 5 && canProceed()) setCurrentStep(p => p + 1);
+      if (currentStep === 0 && editingBookingIds) {
+          setCurrentStep(3); // Jump to Session step in edit mode
+      } else if (currentStep < 5 && canProceed()) {
+          setCurrentStep(p => p + 1);
+      }
   };
   
   const handleBack = () => {
-      if (currentStep > 0) setCurrentStep(p => p - 1);
-      else onCancel();
+      if (currentStep === 3 && editingBookingIds) {
+          setCurrentStep(0); // Back to Date Step instead of Seat/Zone in edit mode
+      } else if (currentStep > 0) {
+          setCurrentStep(p => p - 1);
+      } else {
+          onCancel();
+      }
   };
 
   const handleSubmit = async () => {
     if (loading) return;
     setLoading(true);
+
     try {
-        const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+      const formattedDate = format(selectedDate, 'yyyy-MM-dd');
+      const isStudent = currentUser.role === 'student';
+      const uniqueSessionIds = [...new Set(selectedSessionIds)];
 
-        // 1. Resolve Seat ID
-        // Use zoneSeats to find the seat object using the Clean Number logic
-        // We match where `zone_name` is selectedSection AND `clean_number` is selectedSeatNumber
-        
-        let targetSeatId = null;
-        
-        if (zoneSeats && zoneSeats.length > 0) {
-            const matchedSeat = zoneSeats.find(s => {
-                const sSection = s.zone_name || '일반';
-                const sCleanNum = getCleanSeatNumber(s);
-                
-                // Flexible match: 
-                // 1. Check Section (if selectedSection is set, usually matches)
-                // 2. Check Number (must match input)
-                
-                // If selectedSection is '일반', maybe we don't care about section?
-                // But generally users selected a Section.
-                
-                return sSection === selectedSection && sCleanNum === selectedSeatNumber.toString();
-            });
-            
-            if (matchedSeat) {
-                targetSeatId = matchedSeat.id;
-            }
-        }
+      // 1. Resolve Seat ID
+      let targetSeatId = null;
+      if (zoneSeats && zoneSeats.length > 0) {
+        const matchedSeat = zoneSeats.find(s => 
+          (s.zone_name || '일반') === selectedSection && 
+          getCleanSeatNumber(s) === selectedSeatNumber.toString()
+        );
+        if (matchedSeat) targetSeatId = matchedSeat.id;
+      }
 
+      if (!targetSeatId) {
+        alert('해당 좌석을 찾을 수 없습니다. 번호를 다시 확인해주세요.');
+        setLoading(false);
+        return;
+      }
 
+      // 2. Transact Bookings and Study Plans via Secure RPC
+      // This solves RLS (SECURITY DEFINER) and Atomicity (all or nothing)
+      const studentUserId = isStudent ? (currentUser.user_id || null) : null;
+      
+      const { error: rpcError } = await supabase.rpc('manage_booking_v1', {
+        p_user_id: isStudent ? studentUserId : currentUser.id,
+        p_student_id: isStudent ? currentUser.id : null,
+        p_date: formattedDate,
+        p_session_ids: uniqueSessionIds,
+        p_seat_id: targetSeatId,
+        p_study_content: studyContent,
+        p_old_booking_ids: editingBookingIds || []
+      });
 
-        if (!targetSeatId) {
-             alert('해당 좌석을 찾을 수 없습니다. 번호를 다시 확인해주세요.');
-             setLoading(false);
-             return;
-        }
-
-        // 2. Insert Bookings (Loop sessions)
-        const bookings = selectedSessionIds.map(sessionId => {
-            const isStudent = currentUser.role === 'student';
-            return {
-                user_id: isStudent ? null : currentUser.id,
-                student_id: isStudent ? currentUser.id : null,
-                seat_id: targetSeatId,
-                date: formattedDate,
-                session_id: sessionId,
-                booking_type: 'regular'
-            };
-        });
-
-        const { error: bookingError } = await supabase
-            .from('bookings')
-            .insert(bookings);
-
-        if (bookingError) {
-            console.error("Booking failed:", bookingError);
-            if (bookingError.code === '23505' || bookingError.code === '23503' || bookingError.message?.includes('duplicate')) {
-                throw new Error('선택하신 세션 중 이미 예약된 시간이 포함되어 있습니다. 중복 예약 여부를 확인해주세요.');
-            }
-            throw bookingError;
-        }
-
-        // 3. Upsert Study Plan
-        const plans = selectedSessionIds.map(sessionId => {
-            const isStudent = currentUser.role === 'student';
-            return {
-                user_id: isStudent ? null : currentUser.id,
-                student_id: isStudent ? currentUser.id : null,
-                date: formattedDate,
-                session_id: sessionId,
-                content: studyContent
-            };
-        });
-
-        const { error: planError } = await supabase
-            .from('study_plans')
-            .insert(plans);
-        
-        if (planError) {
-            console.error("Study plan insert failed:", planError);
-        }
-        
-        alert('예약이 성공적으로 완료되었습니다!');
-        onSuccess();
+      if (rpcError) {
+        console.error("Booking Transaction Failed:", rpcError);
+        // User-friendly mapping for common DB errors
+        if (rpcError.code === '23505') throw new Error('중복된 예약 기록이 있습니다.');
+        throw rpcError;
+      }
+      
+      alert(editingBookingIds ? '수정이 완료되었습니다!' : '예약이 성공적으로 완료되었습니다!');
+      onSuccess();
 
     } catch (err) {
-        console.error("Final Booking Error:", err);
-        const errorMsg = err.message || '알 수 없는 오류가 발생했습니다.';
-        alert('예약 처리에 실패했습니다. 중복된 예약이 있는지 확인해주세요.\n\n상세내용: ' + errorMsg);
+      console.error("Final Submit Error:", err);
+      const errorMsg = err.message || '알 수 없는 오류가 발생했습니다.';
+      alert('처리에 실패했습니다.\n\n상세: ' + errorMsg);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
