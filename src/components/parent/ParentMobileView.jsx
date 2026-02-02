@@ -61,8 +61,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     const firstStart = sortedBookings[0].sessions?.start_time;
     const lastEnd = sortedBookings[sortedBookings.length - 1].sessions?.end_time;
 
-    if (lastEnd && currentTime > lastEnd) return { label: '퇴실', color: 'text-gray-500 bg-gray-100' };
-    if (firstStart && currentTime < firstStart) return { label: '예약', color: 'text-ios-indigo bg-ios-indigo/10' };
+    const hasEveningBooking = bookings.some(b => (b.sessions?.start_time || '') >= '17:00:00');
+    const isClassWindow = currentTime >= '09:00:00' && currentTime <= '17:00:00';
 
     const activeSession = sortedBookings.find(b => {
         const s = b.sessions;
@@ -74,6 +74,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         if (att) return { label: '학습중', color: 'text-white bg-ios-emerald' }; 
         return { label: '미입실', color: 'text-ios-rose bg-ios-rose/10' }; 
     }
+
+    if (isClassWindow && hasEveningBooking) return { label: '수업', color: 'text-gray-400 bg-gray-100' };
+    if (lastEnd && currentTime > lastEnd) return { label: '퇴실', color: 'text-gray-500 bg-gray-100' };
+    if (firstStart && currentTime < firstStart) return { label: '예약', color: 'text-ios-indigo bg-ios-indigo/10' };
 
     return { label: '휴식', color: 'text-ios-amber bg-ios-amber/10' };
   };

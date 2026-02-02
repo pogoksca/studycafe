@@ -205,6 +205,7 @@ const UserProfile = ({ user }) => {
                     { label: '출석', color: 'bg-ios-emerald' },
                     { label: '지각', color: 'bg-ios-amber' },
                     { label: '결석', color: 'bg-ios-rose' },
+                    { label: '수업', color: 'bg-gray-100' },
                     { label: '예약', color: 'bg-ios-indigo' }
                   ].map(leg => (
                     <div key={leg.label} className="flex items-center gap-2">

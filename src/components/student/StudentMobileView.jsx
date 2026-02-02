@@ -145,11 +145,8 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
     const lastEnd = sortedBookings[sortedBookings.length - 1].sessions?.end_time;
 
     // Has checked out? (Attendance with timestamp_out or user manually left logic - simplistic here)
-    // If current time > last end, we assume finished.
-    if (lastEnd && currentTime > lastEnd) return { label: '퇴실', color: 'text-gray-500 bg-gray-100' };
-
-    // Before start
-    if (firstStart && currentTime < firstStart) return { label: '예약', color: 'text-ios-indigo bg-ios-indigo/10' };
+    const hasEveningBooking = bookings.some(b => (b.sessions?.start_time || '') >= '17:00:00');
+    const isClassWindow = currentTime >= '09:00:00' && currentTime <= '17:00:00';
 
     // During session range
     const activeSession = sortedBookings.find(b => {
@@ -163,6 +160,10 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
         if (att) return { label: '학습중', color: 'text-white bg-ios-emerald' }; // Active study
         return { label: '미입실', color: 'text-ios-rose bg-ios-rose/10' }; // Late/Not checked in
     }
+
+    if (isClassWindow && hasEveningBooking) return { label: '수업', color: 'text-gray-400 bg-gray-100' };
+    if (lastEnd && currentTime > lastEnd) return { label: '퇴실', color: 'text-gray-500 bg-gray-100' };
+    if (firstStart && currentTime < firstStart) return { label: '예약', color: 'text-ios-indigo bg-ios-indigo/10' };
 
     // In between sessions
     return { label: '휴식', color: 'text-ios-amber bg-ios-amber/10' };

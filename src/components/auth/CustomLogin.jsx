@@ -191,16 +191,23 @@ const CustomLogin = ({ onLoginSuccess }) => {
         }
     };
 
-    // 2. Student/Parent Logic
     const handleStudentParentLogin = async () => {
+        const normalizedName = (formData.name || '').normalize('NFC').trim();
+        const trimmedId = (formData.studentId || '').trim();
+
         const { data: applicant, error: fetchError } = await supabase
             .from('applicant_pool')
             .select('*')
-            .eq('name', formData.name)
-            .eq('student_id', formData.studentId)
+            .eq('name', normalizedName)
+            .eq('student_id', trimmedId)
             .maybeSingle();
 
-        if (fetchError || !applicant) {
+        if (fetchError) {
+            setError('서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+            return;
+        }
+
+        if (!applicant) {
             setError('등록되지 않은 정보이거나 이름/학번이 일치하지 않습니다.');
             return;
         }
@@ -374,6 +381,10 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         placeholder={role === 'teacher' ? "아이디 (ID)" : "이름 (ID)"}
                                         value={formData.name}
                                         onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                        autoComplete="off"
+                                        autoCorrect="off"
+                                        autoCapitalize="none"
+                                        spellCheck="false"
                                         className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                     />
                                 </div>
@@ -386,6 +397,10 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                         maxLength={role === 'teacher' ? undefined : 5}
                                         value={role === 'teacher' ? formData.password : formData.studentId}
                                         onChange={(e) => setFormData(role === 'teacher' ? {...formData, password: e.target.value} : {...formData, studentId: e.target.value})}
+                                        autoComplete="off"
+                                        autoCorrect="off"
+                                        autoCapitalize="none"
+                                        spellCheck="false"
                                         className="w-full bg-gray-50 border border-transparent focus:border-ios-indigo focus:bg-white rounded-2xl pl-12 pr-6 py-4 text-sm font-bold transition-all outline-none caret-ios-indigo"
                                     />
                                 </div>
