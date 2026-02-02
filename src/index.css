@@ -35,7 +35,7 @@
 }
 
 body {
-  @apply bg-[#f2f2f7] text-[#1c1c1e] min-h-screen selection:bg-indigo-500/10;
+  @apply bg-[#f2f2f7] text-[#1c1c1e] min-h-[100dvh] selection:bg-indigo-500/10;
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;

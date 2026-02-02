@@ -3,7 +3,7 @@
 /* Teacher Mobile Dashboard Specific Styles */
 
 .mobile-dashboard-container {
-  min-height: 100vh;
+  min-height: 100dvh;
   background-color: #f9fafb; /* bg-gray-50 */
   display: flex;
   flex-direction: column;

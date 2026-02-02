@@ -517,7 +517,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
   };
 
   return (
-    <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
+    <div className="mobile-container flex flex-col bg-[#F2F2F7] h-[100dvh] overflow-hidden font-sans pb-[safe-area-inset-bottom]">
       {/* Header */}
       <header className="flex-none glass-header px-6 pt-4 pb-4 flex items-center justify-between shadow-sm z-50">
         <div className="flex flex-col">

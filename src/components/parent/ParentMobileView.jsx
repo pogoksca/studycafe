@@ -556,7 +556,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
   };
 
   return (
-    <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
+    <div className="mobile-container flex flex-col bg-[#F2F2F7] h-[100dvh] overflow-hidden font-sans pb-[safe-area-inset-bottom]">
       <header className="flex-none glass-header px-6 pt-4 pb-4 flex items-center justify-between shadow-sm">
         <div className="flex flex-col">
             <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{schoolName.split(' ')[0]}</h1>

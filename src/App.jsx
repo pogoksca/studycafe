@@ -220,7 +220,7 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#F2F2F7] text-[#1C1C1E] overflow-hidden font-sans selection:bg-ios-indigo/10">
+    <div className="flex flex-col h-[100dvh] bg-[#F2F2F7] text-[#1C1C1E] overflow-hidden font-sans selection:bg-ios-indigo/10">
       {/* Top Header - Unified Glass Material */}
       <header className="glass-header px-4 py-2.5 lg:px-8 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-6">

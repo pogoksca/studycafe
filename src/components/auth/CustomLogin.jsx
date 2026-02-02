@@ -331,7 +331,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
     };
 
     return (
-        <div className="min-h-screen bg-[#F2F2F7] flex items-center justify-center p-6 font-sans">
+        <div className="min-h-[100dvh] bg-[#F2F2F7] flex items-center justify-center p-6 font-sans">
             <div className="w-full max-w-md bg-white rounded-[2rem] shadow-2xl shadow-ios-indigo/10 overflow-hidden animate-spring-up border border-gray-100">
                 {/* Visual Header */}
                 <div className="bg-white p-10 text-[#1C1C1E] relative overflow-hidden border-b border-gray-100">
