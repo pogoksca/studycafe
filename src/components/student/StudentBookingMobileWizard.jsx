@@ -502,11 +502,11 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                                       </p>
                                   </div>
                                   <div className="text-right">
-                                      <p className="text-xs font-bold text-[#1C1C1E]">
-                                          {b.seats?.zones?.name}
+                                      <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
+                                          {b.seats?.zones?.name || ''} {b.seats?.zone_name || ''}
                                       </p>
-                                      <p className="text-xs text-ios-indigo font-bold">
-                                          {b.seats?.seat_number}번
+                                      <p className="text-xs font-black text-ios-indigo">
+                                          {b.seat_number || b.seats?.seat_number || '-'}번 좌석
                                       </p>
                                   </div>
                               </div>

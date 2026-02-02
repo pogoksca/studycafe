@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
   Home, Map, List, MapPin, User, LogOut, Layout,
-  ChevronRight, ChevronLeft, Calendar, CheckCircle2, BookOpen, Clock
+  ChevronRight, ChevronLeft, Calendar, CheckCircle2, BookOpen, Clock, X
 } from 'lucide-react';
 import StudentBookingMobileWizard from './StudentBookingMobileWizard';
 import AttendanceCheck from '../booking/AttendanceCheck';
@@ -17,6 +17,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
   const [todayStudyPlan, setTodayStudyPlan] = useState('');
   const [weeklyData, setWeeklyData] = useState({}); // { 'yyyy-MM-dd': { bookings: [], attendance: [] } }
   const [currentDate, setCurrentDate] = useState(new Date()); // For calendar navigation
+  const [manageDate, setManageDate] = useState(null); // For detail modal
   
   // Fetch current session for header info
   useEffect(() => {
@@ -72,9 +73,11 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                 *,
                 sessions (
                     id,
+                    name,
                     start_time,
                     end_time
                 ),
+                seats (id, seat_number, zone_name, zone_id, zones(name)),
                 attendance (
                     id,
                     booking_id,
@@ -245,11 +248,15 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                             }
 
                             return (
-                                <div key={i} className="flex flex-col items-center gap-2">
+                                <div 
+                                    key={i} 
+                                    className={`flex flex-col items-center gap-2 ${dayData ? 'cursor-pointer' : ''}`}
+                                    onClick={() => dayData && setManageDate(day)}
+                                >
                                     <span className={`text-[9px] font-black ${isCur ? 'text-[#1C1C1E]' : 'text-gray-300'}`}>
                                         {['월','화','수','목','금','토','일'][i]}
                                     </span>
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ${bgClass}`}>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black transition-all ios-tap ${bgClass}`}>
                                         {format(day, 'd')}
                                     </div>
                                     <div className="h-4 flex items-center justify-center">
@@ -331,10 +338,99 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
     }
   };
 
+  const renderDayDetailModal = () => {
+    if (!manageDate) return null;
+    
+    const dateStr = format(manageDate, 'yyyy-MM-dd');
+    const dayData = weeklyData[dateStr];
+    const bookingsForDate = dayData?.bookings || [];
+
+    // Sort bookings by start time
+    const sortedBookings = [...bookingsForDate].sort((a, b) => 
+        (a.sessions?.start_time || '').localeCompare(b.sessions?.start_time || '')
+    );
+
+    return (
+        <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative animate-spring-up">
+                <div className="p-6">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-xl font-black text-[#1C1C1E]">
+                            {format(manageDate, 'M월 d일')} 예약 상세
+                        </h3>
+                        <button 
+                            onClick={() => setManageDate(null)} 
+                            className="p-2 -mr-2 text-gray-400 hover:text-black ios-tap"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-4 mb-4 max-h-[50vh] overflow-y-auto scrollbar-hide">
+                        {sortedBookings.length > 0 ? sortedBookings.map((b, i) => {
+                            const att = b.attendance?.[0];
+                            const statusLabel = att 
+                                ? (att.status === 'present' ? '출석' : att.status === 'late' ? '지각' : '결석')
+                                : '대기';
+                            const statusColor = att
+                                ? (att.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : att.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : 'text-ios-rose bg-ios-rose/10')
+                                : 'text-gray-400 bg-gray-50';
+
+                            return (
+                                <div key={i} className="p-4 bg-gray-50 rounded-2xl flex items-center justify-between border border-gray-100">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <p className="text-sm font-black text-[#1C1C1E]">
+                                                {b.sessions?.name}
+                                            </p>
+                                            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statusColor}`}>
+                                                {statusLabel}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-ios-gray font-bold">
+                                            <Clock className="w-3 h-3 inline-block mr-1 mb-0.5" />
+                                            {b.sessions?.start_time.slice(0,5)} ~ {b.sessions?.end_time.slice(0,5)}
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-black text-ios-indigo/60 mb-0.5">
+                                            {b.seats?.zones?.name || ''} {b.seats?.zone_name || ''}
+                                        </p>
+                                        <p className="text-xs font-black text-ios-indigo">
+                                            {b.seat_number || b.seats?.seat_number || '-'}번 좌석
+                                        </p>
+                                        {att?.timestamp_in && (
+                                            <p className="text-[10px] text-ios-gray font-bold mt-1">
+                                                입실: {format(new Date(att.timestamp_in), 'HH:mm')}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        }) : (
+                            <div className="py-12 text-center space-y-2">
+                                <Calendar className="w-10 h-10 text-gray-200 mx-auto" />
+                                <p className="text-sm font-bold text-gray-400">등록된 예약 정보가 없습니다.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <button 
+                        onClick={() => setManageDate(null)}
+                        className="w-full py-4 bg-[#1C1C1E] text-white rounded-2xl font-black text-sm hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg"
+                    >
+                        확인
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+  };
+
   return (
     <div className="mobile-container flex flex-col bg-[#F2F2F7] h-screen overflow-hidden font-sans pb-[safe-area-inset-bottom]">
       {/* Header */}
-      <header className="flex-none glass-header px-6 pt-10 pb-4 flex items-center justify-between shadow-sm z-50">
+      <header className="flex-none glass-header px-6 pt-4 pb-4 flex items-center justify-between shadow-sm z-50">
         <div className="flex flex-col">
             <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{schoolName.split(' ')[0]}</h1>
             <p className="text-[10px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70">Study Cafe Manager</p>
@@ -358,7 +454,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
       {/* Bottom Navigation */}
       {/* Hide bottom nav when in wizard logic if needed, but keeping it allows quick exit */}
       {activeTab !== 'map' && (
-      <nav className="flex-none glass-material pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 px-6 flex justify-between items-center z-50 shadow-[0_-4px_40px_rgba(0,0,0,0.03)] border-t border-white/40">
+      <nav className="flex-none glass-material pb-[calc(0.4rem+env(safe-area-inset-bottom,0px))] pt-2 px-6 flex justify-between items-center z-50 shadow-[0_-4px_40px_rgba(0,0,0,0.03)] border-t border-white/40">
         {[
           { id: 'home', icon: Home, label: '홈' },
           { id: 'map', icon: Map, label: '예약' },
@@ -382,6 +478,7 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
         ))}
       </nav>
       )}
+      {renderDayDetailModal()}
     </div>
   );
 };

@@ -469,7 +469,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const absentCount = attendanceData.filter(d => d.is_active && (d.status === 'absent' || !d.status)).length;
 
         return (
-            <header className="flex-none glass-header px-6 pt-10 pb-4 flex flex-col gap-5 z-50">
+            <header className="flex-none glass-header px-6 pt-4 pb-4 flex flex-col gap-5 z-50">
                 <div className="flex justify-between items-center">
                     <div className="flex flex-col">
                         <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">학습실 감독</h1>
