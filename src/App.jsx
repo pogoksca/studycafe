@@ -143,6 +143,39 @@ function App() {
     localStorage.setItem('adminSubTab', adminSubTab);
   }, [adminSubTab]);
 
+  // --- 자동 로그아웃 로직 (30분 미활동 시) ---
+  useEffect(() => {
+    let timeoutId;
+    // 30분 (30분 * 60초 * 1000밀리초)
+    const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (currentUser) {
+        timeoutId = setTimeout(() => {
+          handleLogout();
+          alert('장시간 활동이 없어 보안을 위해 자동 로그아웃되었습니다.');
+        }, INACTIVITY_TIMEOUT);
+      }
+    };
+
+    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
+
+    if (currentUser) {
+      resetTimer();
+      activityEvents.forEach(event => {
+        window.addEventListener(event, resetTimer);
+      });
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [currentUser]);
+
   const handleZoneChange = (zoneId) => {
     setSelectedZoneId(zoneId);
     setSelectedSeat(null); // Explicitly clear seat on zone change
