@@ -28,6 +28,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     present: 0,
     late: 0,
     absent: 0,
+    earlyLeave: 0,
     history: []
   });
   const [loading, setLoading] = useState(true);
@@ -48,8 +49,14 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
     if (dateStr < todayStr) {
         if (!attendance.length) return { label: '결석', color: 'text-ios-rose bg-ios-rose/10' };
+        
+        // Check day status priorities for display
+        const hasEarlyLeave = attendance.some(a => a.status === 'early_leave');
+        if (hasEarlyLeave) return { label: '조퇴', color: 'text-ios-blue bg-ios-blue/10' };
+
         const isLate = attendance.some(a => a.status === 'late');
         if (isLate) return { label: '지각', color: 'text-ios-amber bg-ios-amber/10' };
+
         return { label: '이수', color: 'text-ios-emerald bg-ios-emerald/10' };
     }
 
@@ -189,7 +196,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         const [bookingsRes, plansRes] = await Promise.all([
           supabase
             .from('bookings')
-            .select('id, date, session_id, attendance (status, timestamp_in)')
+            .select('id, date, session_id, attendance (status, timestamp_in), sessions (name)')
             .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
             .gte('date', qStart)
             .lte('date', qEnd)
@@ -206,27 +213,71 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         const qStudyPlans = plansRes.data;
 
         if (qBookings) {
-          const counts = { present: 0, late: 0, absent: 0 };
+          const counts = { present: 0, late: 0, absent: 0, earlyLeave: 0 };
           const history = [];
           
+          // Group by Date for Day-based stats
+          const bookingsByDate = {};
+          
           qBookings.forEach(b => {
-            const att = b.attendance?.[0];
-            if (att) {
-              if (att.status === 'present') counts.present++;
-              else if (att.status === 'late') counts.late++;
-              else if (att.status === 'absent') counts.absent++;
-              
-              // Find matching study plan
-              const plan = qStudyPlans?.find(p => p.date === b.date && p.session_id === b.session_id);
-              
-              history.push({
-                  date: b.date,
-                  status: att.status,
-                  time: att.timestamp_in ? format(new Date(att.timestamp_in), 'HH:mm') : '-',
-                  content: plan?.content || null
-              });
-            }
+            if (!bookingsByDate[b.date]) bookingsByDate[b.date] = [];
+            bookingsByDate[b.date].push(b);
+
+             // Prepare History
+             const att = b.attendance?.[0];
+             // Past booking without attendance check
+             const todayStr = format(new Date(), 'yyyy-MM-dd');
+             const isPastBooking = b.date < todayStr;
+             const status = att?.status || (isPastBooking ? 'absent' : null);
+             
+             if (status) { // Only add if we have a status (stats or implicit absence)
+                 const plan = qStudyPlans?.find(p => p.date === b.date && p.session_id === b.session_id);
+                 history.push({
+                      date: b.date,
+                      status: status, // present, late, absent, early_leave
+                      time: att?.timestamp_in ? format(new Date(att.timestamp_in), 'HH:mm') : '-',
+                      content: plan?.content || null,
+                      session_name: b.sessions?.name
+                 });
+             }
           });
+
+          // Calculate Stats
+          Object.keys(bookingsByDate).forEach(date => {
+              // Don't count future dates
+              const todayStr = format(new Date(), 'yyyy-MM-dd');
+              if (date > todayStr) return;
+              
+              const dayBookings = bookingsByDate[date];
+              const attendedBookings = dayBookings.filter(b => b.attendance && b.attendance.length > 0);
+              
+              // 1. Lateness (Session based)
+              dayBookings.forEach(b => {
+                 if (b.attendance?.[0]?.status === 'late') {
+                     counts.late++;
+                 }
+              });
+
+              // 2. Day Status
+              if (attendedBookings.length === 0) {
+                  // Absence: No attendance at all (check if date is in past)
+                  if (date < todayStr) {
+                      counts.absent++;
+                  }
+              } else {
+                  // Has some attendance
+                  const hasEarlyLeave = attendedBookings.some(b => b.attendance[0].status === 'early_leave');
+                  
+                  if (hasEarlyLeave) {
+                      counts.earlyLeave++;
+                  } else if (attendedBookings.length === dayBookings.length) {
+                      // All attended, no early leave
+                      // This implies "Completion" (이수)
+                      counts.present++; 
+                  }
+              }
+          });
+
           setStats({
             ...counts,
             history: history.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15)
@@ -299,12 +350,12 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
             <div className="space-y-2 overflow-y-auto max-h-[120px] pr-1 scrollbar-hide">
                 {todayData.bookings.length > 0 ? todayData.bookings.map((booking, idx) => {
                     const att = booking.attendance?.[0];
-                    const status = att ? (att.status === 'present' ? { label: '출석', color: 'text-ios-emerald bg-ios-emerald/10' } : att.status === 'late' ? { label: '지각', color: 'text-ios-amber bg-ios-amber/10' } : { label: '결석', color: 'text-ios-rose bg-ios-rose/10' }) : { label: '대기', color: 'text-gray-400 bg-gray-50' };
+                    const status = att ? (att.status === 'present' ? { label: '출석', color: 'text-ios-emerald bg-ios-emerald/10' } : att.status === 'late' ? { label: '지각', color: 'text-ios-amber bg-ios-amber/10' } : att.status === 'early_leave' ? { label: '조퇴', color: 'text-ios-blue bg-ios-blue/10' } : { label: '결석', color: 'text-ios-rose bg-ios-rose/10' }) : { label: '대기', color: 'text-gray-400 bg-gray-50' };
                     
                     return (
                         <div key={booking.id} className={`flex items-center justify-between py-2 ${idx !== todayData.bookings.length - 1 ? 'border-b border-gray-50' : ''}`}>
                             <div className="flex items-center gap-3">
-                                <div className={`w-1.5 h-1.5 rounded-full ${att?.status === 'present' ? 'bg-ios-emerald' : att?.status === 'late' ? 'bg-ios-amber' : 'bg-gray-200'}`} />
+                                <div className={`w-1.5 h-1.5 rounded-full ${att?.status === 'present' ? 'bg-ios-emerald' : att?.status === 'late' ? 'bg-ios-amber' : att?.status === 'early_leave' ? 'bg-ios-blue' : 'bg-gray-200'}`} />
                                 <div>
                                     <p className="text-[11px] font-black text-[#1C1C1E] leading-none mb-1">{booking.sessions?.name}</p>
                                     <p className="text-[11px] font-bold text-ios-gray leading-none">
@@ -358,6 +409,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                         bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
                     } else if (status?.label === '지각') {
                         bgClass = 'bg-ios-amber text-white shadow-sm border-none';
+                    } else if (status?.label === '조퇴') {
+                        bgClass = 'bg-ios-blue text-white shadow-sm border-none';
                     } else if (status?.label === '결석' || status?.label === '미입실') {
                         bgClass = 'bg-ios-rose text-white shadow-sm border-none';
                     } else if (status?.label === '예약') {
@@ -409,12 +462,38 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
       <div className="p-5 space-y-6 animate-fade-in scrollbar-hide">
         <div className="glass-card p-8 relative overflow-hidden">
             <div className="flex items-center gap-2 mb-6 text-ios-indigo"><BarChart3 className="w-4 h-4" /><h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3></div>
-            <div className="grid grid-cols-3 gap-2">
-                <div className="flex flex-col items-center p-4 bg-ios-emerald/5 rounded-apple"><span className="text-[10px] font-black text-ios-emerald uppercase opacity-60 mb-1">이수</span><span className="text-2xl font-black text-ios-emerald">{stats.present}</span></div>
-                <div className="flex flex-col items-center p-4 bg-ios-amber/5 rounded-apple"><span className="text-[10px] font-black text-ios-amber uppercase opacity-60 mb-1">지각</span><span className="text-2xl font-black text-ios-amber">{stats.late}</span></div>
-                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-apple"><span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span><span className="text-2xl font-black text-ios-rose">{stats.absent}</span></div>
+            <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col items-center p-4 bg-ios-emerald/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-emerald uppercase opacity-60 mb-1">이수</span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-ios-emerald">{stats.present}</span>
+                        <span className="text-xs font-bold text-ios-emerald/70">일</span>
+                    </div>
+                </div>
+                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-ios-rose">{stats.absent}</span>
+                        <span className="text-xs font-bold text-ios-rose/70">일</span>
+                    </div>
+                </div>
+                <div className="flex flex-col items-center p-4 bg-ios-amber/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-amber uppercase opacity-60 mb-1">지각</span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-ios-amber">{stats.late}</span>
+                        <span className="text-xs font-bold text-ios-amber/70">회</span>
+                    </div>
+                </div>
+                <div className="flex flex-col items-center p-4 bg-ios-blue/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-blue uppercase opacity-60 mb-1">조퇴</span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-ios-blue">{stats.earlyLeave}</span>
+                        <span className="text-xs font-bold text-ios-blue/70">일</span>
+                    </div>
+                </div>
             </div>
         </div>
+
         <div className="space-y-3">
             <div className="flex items-center justify-between px-2">
                 <h3 className="text-xs font-black text-[#1C1C1E] uppercase tracking-widest">최근 학습 일지</h3>
@@ -424,12 +503,16 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                 {stats.history.length > 0 ? stats.history.map((h, i) => (
                     <div key={i} className="bg-white p-4 rounded-apple border border-gray-100 shadow-sm space-y-3 transition-all active:scale-[0.98]">
                         <div className="flex items-center justify-between">
+
                             <div className="flex items-center gap-3">
-                                <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : 'bg-ios-rose'}`} />
+                                <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : h.status === 'early_leave' ? 'bg-ios-blue' : 'bg-ios-rose'}`} />
                                 <div className="space-y-0.5">
-                                    <p className="text-xs font-black text-[#1C1C1E]">{format(new Date(h.date), 'M월 d일 (EEE)', { locale: ko })}</p>
+                                    <p className="text-xs font-black text-[#1C1C1E]">
+                                        {format(new Date(h.date), 'M월 d일 (EEE)', { locale: ko })}
+                                        {h.session_name && <span className="text-[10px] text-ios-gray font-bold ml-1.5">· {h.session_name}</span>}
+                                    </p>
                                     <p className="text-[10px] font-bold text-ios-gray uppercase tracking-widest leading-none">
-                                        {h.status === 'present' ? '정상 이수' : h.status === 'late' ? '지각입실' : '미출석'}
+                                        {h.status === 'present' ? '정상 이수' : h.status === 'late' ? '지각입실' : h.status === 'early_leave' ? '조퇴' : '미출석'}
                                     </p>
                                 </div>
                             </div>
@@ -444,9 +527,9 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                 <div className="p-2 bg-ios-indigo/5 rounded-apple flex-shrink-0">
                                     <BookOpen className="w-3.5 h-3.5 text-ios-indigo" />
                                 </div>
-                                <div className="flex-1">
-                                    <p className="text-[11px] font-bold text-gray-700 leading-relaxed italic">
-                                        "{h.content}"
+                                <div className="flex-1 flex items-center">
+                                    <p className="text-xs font-bold text-gray-800 leading-relaxed">
+                                        {h.content}
                                     </p>
                                 </div>
                             </div>
@@ -501,11 +584,11 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                             const isPastSession = isToday && sessionEndTime && currentTime > sessionEndTime;
                             
                             const statusLabel = attObj 
-                                ? (attObj.status === 'present' ? '출석' : attObj.status === 'late' ? '지각' : '결석')
+                                ? (attObj.status === 'present' ? '출석' : attObj.status === 'late' ? '지각' : attObj.status === 'early_leave' ? '조퇴' : '결석')
                                 : (isPastSession ? '결석' : '대기');
 
                             const statusColor = attObj
-                                ? (attObj.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : attObj.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : 'text-ios-rose bg-ios-rose/10')
+                                ? (attObj.status === 'present' ? 'text-ios-emerald bg-ios-emerald/10' : attObj.status === 'late' ? 'text-ios-amber bg-ios-amber/10' : attObj.status === 'early_leave' ? 'text-ios-blue bg-ios-blue/10' : 'text-ios-rose bg-ios-rose/10')
                                 : (isPastSession ? 'text-ios-rose bg-ios-rose/10' : 'text-gray-400 bg-gray-50');
 
                             return (
