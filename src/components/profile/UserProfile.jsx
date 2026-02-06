@@ -20,8 +20,14 @@ const UserProfile = ({ user }) => {
     if (!user) return;
 
     const fetchProfileData = async () => {
-        const startOfAcademicYear = '2025-03-01'; // Fixed start date
         const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth() + 1; // 0-indexed
+        
+        // Dynamic Academic Year: Starts on March 1st
+        // If Jan or Feb, belongs to previous year's academic calendar
+        const academicYear = month >= 3 ? year : year - 1;
+        const startOfAcademicYear = `${academicYear}-03-01`;
         const todayStr = format(today, 'yyyy-MM-dd');
 
         // 1. Fetch Bookings & Attendance for Stats & Calendar
@@ -45,43 +51,73 @@ const UserProfile = ({ user }) => {
             setBookings(bookingData);
             
             // Calculate Stats
-            let totalBookings = 0; // Only past/today bookings count for rate
+            let totalBookings = 0;
             let attendedCount = 0;
             let lates = 0;
             let studyMinutes = 0;
             const studyDaysSet = new Set();
+            
+            const now = new Date(); // To exclude future sessions today
 
             bookingData.forEach(b => {
-                const isFuture = b.date > todayStr;
-                if (isFuture) return; 
+                const isFutureDate = b.date > todayStr;
+                if (isFutureDate) return; 
 
-                totalBookings++;
-                // Check attendance
-                // Note: bookingData has array of attendance usually, but we assume 1-to-1 or use first
-                const att = b.attendance && b.attendance[0];
+                // Refined Total Bookings Logic:
+                // If date is today, only count if session has started
+                // (Or strictly: if session has ended? Let's say if it has started, user should be there)
+                // Common practice: Only count past sessions or sessions where attendance exists.
+                let shouldCountAsBooking = true;
+                if (b.date === todayStr && b.sessions) {
+                    const sessionStart = new Date(`${b.date}T${b.sessions.start_time}+09:00`);
+                    if (now < sessionStart) {
+                        shouldCountAsBooking = false; // Session hasn't started yet
+                    }
+                }
                 
-                if (att && (att.status === 'present' || att.status === 'late')) {
-                    attendedCount++;
+                if (shouldCountAsBooking) {
+                    totalBookings++;
+                }
+
+                // Check attendance
+                const att = b.attendance && b.attendance[0];
+                const validStatus = ['present', 'late', 'early_leave'];
+                
+                if (att && validStatus.includes(att.status)) {
+                    attendedCount++; // Now includes early_leave
                     studyDaysSet.add(b.date);
                     if (att.status === 'late') lates++;
 
-                    // Calc Time
+                    // Precise Time Calculation
                     if (b.sessions) {
-                        const start = new Date(`${b.date}T${b.sessions.start_time}`);
-                        const end = new Date(`${b.date}T${b.sessions.end_time}`);
-                        const duration = (end - start) / (1000 * 60); // minutes
+                        // 1. Determine Standard Session Time
+                        const sessionStart = new Date(`${b.date}T${b.sessions.start_time}+09:00`);
+                        const sessionEnd = new Date(`${b.date}T${b.sessions.end_time}+09:00`);
                         
-                        let latePenalty = 0;
+                        // 2. Determine Actual In/Out
+                        // Use timestamp_in if valid, else fallback to session start (unless late??)
+                        // If no timestamp_in but status is present, assume session start.
+                        let effectiveStart = sessionStart;
                         if (att.timestamp_in) {
-                            const checkIn = new Date(att.timestamp_in); // ISO
-                            // Adjust checkIn if date diff (KST issue? assummed local for calc simplifiction or provided ISO is correct)
-                            // Simplest: Compare timestamps as epochs if possible or just use difference
-                            const sessionStart = new Date(`${b.date}T${b.sessions.start_time}+09:00`); // Force KST for session
-                            if (checkIn > sessionStart) {
-                                latePenalty = (checkIn - sessionStart) / (1000 * 60);
-                            }
+                            const checkIn = new Date(att.timestamp_in);
+                            if (checkIn > sessionStart) effectiveStart = checkIn;
                         }
-                        studyMinutes += Math.max(0, duration - Math.max(0, latePenalty));
+                        
+                        let effectiveEnd = sessionEnd;
+                        if (att.timestamp_out) {
+                            const checkOut = new Date(att.timestamp_out);
+                            if (checkOut < sessionEnd) effectiveEnd = checkOut;
+                        } else if (att.status === 'early_leave') {
+                            // If early_leave but no timestamp_out, we can't penalty accurately.
+                            // Fallback: maybe just count it? Or assume end? 
+                            // Let's assume sessionEnd if missing, but usually early_leave implies timestamp_out exists.
+                        }
+
+                        // 3. Calculate Duration
+                        if (effectiveEnd > effectiveStart) {
+                            const duration = (effectiveEnd - effectiveStart) / (1000 * 60);
+                            studyMinutes += duration;
+                        }
                     }
                 }
             });
@@ -95,9 +131,6 @@ const UserProfile = ({ user }) => {
         }
 
         // 2. Fetch Leaderboard (RPC)
-        // NOTE: RPC call is commented out to prevent 404 error in console because the function is not yet created in Supabase.
-        // Once you run the provided SQL in Supabase Dashboard, you can uncomment this block.
-        /*
         try {
             const { data: lbData } = await supabase.rpc('get_elite_leaderboard', { 
                 start_date: startOfAcademicYear, 
@@ -105,16 +138,21 @@ const UserProfile = ({ user }) => {
             });
             
             if (lbData) {
-                setLeaderboard(lbData);
+                // Map RPC result to UI format
+                const formattedLeaderboard = lbData.map(item => ({
+                    rank: item.rank,
+                    name: item.student_name,  // RPC returns student_name
+                    info: `${item.grade}학년`, // RPC returns grade
+                    score: Math.round(item.total_time_minutes || 0) // RPC returns total_time_minutes
+                }));
+                setLeaderboard(formattedLeaderboard);
             } else {
                 setLeaderboard([]); 
             }
         } catch (e) {
-            console.warn('Leaderboard fetch failed (RPC missing?):', e);
+            console.warn('Leaderboard fetch failed:', e);
             setLeaderboard([]);
         }
-        */
-        setLeaderboard([]); // Ensure it's empty to show "Rankings will be calculated..." message
     };
 
     fetchProfileData();

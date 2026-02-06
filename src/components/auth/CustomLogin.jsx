@@ -389,14 +389,23 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                     />
                                 </div>
                                 <div className="relative group">
-                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-gray group-focus-within:text-ios-indigo transition-colors" />
                                     <input 
                                         required
                                         type={role === 'teacher' ? "password" : "text"}
+                                        inputMode={role === 'teacher' ? "text" : "numeric"}
+                                        pattern={role === 'teacher' ? undefined : "[0-9]*"}
                                         placeholder={role === 'teacher' ? "비밀번호 (PW)" : "학번 5자리 (PW)"}
                                         maxLength={role === 'teacher' ? undefined : 5}
                                         value={role === 'teacher' ? formData.password : formData.studentId}
-                                        onChange={(e) => setFormData(role === 'teacher' ? {...formData, password: e.target.value} : {...formData, studentId: e.target.value})}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (role === 'teacher') {
+                                                setFormData({...formData, password: val});
+                                            } else {
+                                                // Force numeric and remove spaces for Student ID
+                                                setFormData({...formData, studentId: val.replace(/[^0-9]/g, '')});
+                                            }
+                                        }}
                                         autoComplete="off"
                                         autoCorrect="off"
                                         autoCapitalize="none"
