@@ -20,7 +20,6 @@ CREATE TABLE public.applicant_pool (
   CONSTRAINT applicant_pool_pkey PRIMARY KEY (id),
   CONSTRAINT applicant_pool_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
-
 CREATE TABLE public.attendance (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   booking_id uuid UNIQUE,
@@ -35,7 +34,6 @@ CREATE TABLE public.attendance (
   CONSTRAINT attendance_pkey PRIMARY KEY (id),
   CONSTRAINT attendance_booking_id_fkey FOREIGN KEY (booking_id) REFERENCES public.bookings(id)
 );
-
 CREATE TABLE public.bookings (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
@@ -51,14 +49,12 @@ CREATE TABLE public.bookings (
   CONSTRAINT bookings_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id),
   CONSTRAINT bookings_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.profiles_student(id)
 );
-
 CREATE TABLE public.configs (
   key text NOT NULL,
   value jsonb NOT NULL,
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT configs_pkey PRIMARY KEY (key)
 );
-
 CREATE TABLE public.operation_exceptions (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   exception_date date NOT NULL,
@@ -69,7 +65,6 @@ CREATE TABLE public.operation_exceptions (
   CONSTRAINT operation_exceptions_pkey PRIMARY KEY (id),
   CONSTRAINT operation_exceptions_zone_id_fkey FOREIGN KEY (zone_id) REFERENCES public.zones(id)
 );
-
 CREATE TABLE public.operation_quarters (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   quarter integer,
@@ -79,7 +74,6 @@ CREATE TABLE public.operation_quarters (
   academic_year integer DEFAULT 2026,
   CONSTRAINT operation_quarters_pkey PRIMARY KEY (id)
 );
-
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
   username text NOT NULL UNIQUE,
@@ -92,7 +86,6 @@ CREATE TABLE public.profiles (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT profiles_pkey PRIMARY KEY (id)
 );
-
 CREATE TABLE public.profiles_student (
   id uuid NOT NULL,
   username text UNIQUE,
@@ -105,7 +98,6 @@ CREATE TABLE public.profiles_student (
   status text DEFAULT 'approved'::text,
   CONSTRAINT profiles_student_pkey PRIMARY KEY (id)
 );
-
 CREATE TABLE public.seats (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   quarter_id uuid,
@@ -132,18 +124,16 @@ CREATE TABLE public.seats (
   CONSTRAINT seats_pkey PRIMARY KEY (id),
   CONSTRAINT seats_zone_id_fkey FOREIGN KEY (zone_id) REFERENCES public.zones(id)
 );
-
 CREATE TABLE public.session_operating_days (
-  id integer NOT NULL,
+  id integer NOT NULL DEFAULT nextval('session_operating_days_id_seq'::regclass),
   session_id integer,
   day_of_week integer CHECK (day_of_week >= 0 AND day_of_week <= 6),
   is_active boolean DEFAULT true,
   CONSTRAINT session_operating_days_pkey PRIMARY KEY (id),
   CONSTRAINT session_operating_days_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id)
 );
-
 CREATE TABLE public.sessions (
-  id integer NOT NULL,
+  id integer NOT NULL DEFAULT nextval('sessions_id_seq'::regclass),
   name text NOT NULL,
   start_time time without time zone NOT NULL,
   end_time time without time zone NOT NULL,
@@ -151,7 +141,6 @@ CREATE TABLE public.sessions (
   CONSTRAINT sessions_pkey PRIMARY KEY (id),
   CONSTRAINT sessions_zone_id_fkey FOREIGN KEY (zone_id) REFERENCES public.zones(id)
 );
-
 CREATE TABLE public.study_plans (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid,
@@ -163,10 +152,8 @@ CREATE TABLE public.study_plans (
   CONSTRAINT study_plans_pkey PRIMARY KEY (id),
   CONSTRAINT study_plans_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
   CONSTRAINT study_plans_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id),
-  CONSTRAINT study_plans_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.profiles_student(id),
-  CONSTRAINT study_plans_student_date_session_key UNIQUE (student_id, date, session_id)
+  CONSTRAINT study_plans_student_id_fkey FOREIGN KEY (student_id) REFERENCES public.profiles_student(id)
 );
-
 CREATE TABLE public.supervision_assignments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   date date NOT NULL,
@@ -182,9 +169,8 @@ CREATE TABLE public.supervision_assignments (
   CONSTRAINT supervision_assignments_zone_id_fkey FOREIGN KEY (zone_id) REFERENCES public.zones(id),
   CONSTRAINT supervision_assignments_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.sessions(id)
 );
-
 CREATE TABLE public.zones (
-  id integer NOT NULL,
+  id integer NOT NULL DEFAULT nextval('zones_id_seq'::regclass),
   name text NOT NULL UNIQUE,
   description text,
   settings jsonb DEFAULT '{"radius": 100, "instant_booking": false, "qr_code_required": false}'::jsonb,
@@ -193,25 +179,3 @@ CREATE TABLE public.zones (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT zones_pkey PRIMARY KEY (id)
 );
-
--- ROW LEVEL SECURITY POLICIES --
-
--- Study Plans
-ALTER TABLE public.study_plans ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Staff full access plans" ON public.study_plans FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Anonymous student management plans" ON public.study_plans FOR ALL TO anon USING (true) WITH CHECK (true);
-
--- Bookings
-ALTER TABLE public.bookings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Staff full access bookings" ON public.bookings FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Anonymous booking management" ON public.bookings FOR ALL TO anon USING (true) WITH CHECK (true);
-
--- Applicant Pool
-ALTER TABLE public.applicant_pool ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Staff full access pool" ON public.applicant_pool FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "Anonymous student application" ON public.applicant_pool FOR ALL TO anon USING (true) WITH CHECK (true);
-
--- Permissions
-GRANT ALL ON public.study_plans TO anon, authenticated;
-GRANT ALL ON public.bookings TO anon, authenticated;
-GRANT ALL ON public.applicant_pool TO anon, authenticated;

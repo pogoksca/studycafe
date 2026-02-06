@@ -192,27 +192,49 @@ const CustomLogin = ({ onLoginSuccess }) => {
     };
 
     const handleStudentParentLogin = async () => {
-        const normalizedName = (formData.name || '').normalize('NFC').trim();
-        const trimmedId = (formData.studentId || '').trim();
+        const inputName = (formData.name || '').normalize('NFC').trim();
+        const inputId = (formData.studentId || '').trim();
 
-        const { data: applicant, error: fetchError } = await supabase
+        // Query by ID only first to minimize DB-side string matching issues
+        const { data: applicants, error: fetchError } = await supabase
             .from('applicant_pool')
             .select('*')
-            .eq('name', normalizedName)
-            .eq('student_id', trimmedId)
-            .maybeSingle();
+            .eq('student_id', inputId);
 
         if (fetchError) {
+            alert(`Query Error: ${fetchError.message}`); // Debug
             setError('서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
             return;
         }
 
-        if (!applicant) {
-            setError('등록되지 않은 정보이거나 이름/학번이 일치하지 않습니다.');
+        // Debug Alert for Mobile
+        // alert(`Debug: InputID=[${inputId}] InputName=[${inputName}] Found=[${applicants?.length}]`);
+
+        if (!applicants || applicants.length === 0) {
+            setError('등록되지 않은 학번입니다.');
             return;
         }
 
-        setApplicantData(applicant);
+        // Find matching applicant by Name (robust comparison)
+        // 1. Normalize both to NFC
+        // 2. Remove all spaces for comparison (handle accidental internal spaces)
+        let matchedApplicant = applicants.find(app => {
+            const dbName = (app.name || '').normalize('NFC').replace(/\s+/g, '');
+            const searchName = inputName.replace(/\s+/g, '');
+            return dbName === searchName;
+        });
+
+        if (!matchedApplicant) {
+            // Debug info
+            const foundNames = applicants.map(a => a.name).join(', ');
+            alert(`학번 일치, 이름 불일치.\n입력이름: [${inputName}]\nDB이름: [${foundNames}]`); // Helpful debug
+            
+            setError('학번은 존재하나 이름이 일치하지 않습니다. (입력한 이름 확인)');
+            return;
+        }
+
+        setApplicantData(matchedApplicant);
+        const applicant = matchedApplicant; // alias for logic below
 
         // Logic for Parent
         if (role === 'parent') {
