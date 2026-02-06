@@ -197,7 +197,7 @@ function App() {
       items: [
         { id: 'zones', label: '학습 공간 관리', icon: Box, roles: ['admin'] },
         { id: 'layout', label: '공간 배치 편집', icon: Map, roles: ['admin'] },
-        { id: 'zone_grades', label: 'Zone별 학년 지정', icon: ShieldCheck, roles: ['admin'] },
+        { id: 'zone_grades', label: '구역별 학년 지정', icon: ShieldCheck, roles: ['admin'] },
         { id: 'students', label: '학생 명단 관리', icon: Users, roles: ['admin'] },
         { id: 'schedule', label: '운영 일정 설정', icon: Calendar, roles: ['admin'] },
       ]

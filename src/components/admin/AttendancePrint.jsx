@@ -127,8 +127,7 @@ const AttendancePrint = () => {
         try {
             // 1. Fetch Students
             const { data: students } = await supabase
-                .from('profiles')
-                .eq('role', 'student')
+                .from('profiles_student')
                 .select('*')
                 .order('grade', { ascending: true })
                 .order('class_number', { ascending: true })
@@ -179,7 +178,7 @@ const AttendancePrint = () => {
 
                     // Filter bookings for students of this specific grade
                     const gradeStudentIds = gradeStudents.map(s => s.id);
-                    const gradeBookings = (allBookings || []).filter(b => gradeStudentIds.includes(b.user_id));
+                    const gradeBookings = (allBookings || []).filter(b => gradeStudentIds.includes(b.student_id));
 
                     fullPrintData.push({
                         weekInfo: week,
@@ -508,14 +507,22 @@ const AttendancePrint = () => {
                                     <span>학년도: {selectedQuarter?.academic_year}</span>
                                     <span>대상: {page.grade}학년</span>
                                 </div>
+                                 <div className="flex gap-3 text-[9px] font-normal items-center">
+                                    <span>[출결기호]</span>
+                                    <span>출석: <span style={{ fontWeight: 'bold' }}>O</span></span>
+                                    <span>조퇴: <span style={{ color: '#ff3b30', fontWeight: 'bold' }}>/</span></span>
+                                    <span>지각: <span style={{ color: '#007aff', fontWeight: 'bold' }}>△</span></span>
+                                    <span>결석: <span style={{ color: '#ff3b30', fontWeight: 'bold' }}>Ｘ</span></span>
+                                    <span>미예약: -</span>
+                                </div>
                             </div>
 
                             <table className="attendance-table">
                                 <thead>
                                     <tr>
                                         <th style={{ width: '40px' }}>No</th>
-                                        <th style={{ width: '100px' }}>학년/반/번호</th>
-                                        <th style={{ width: '100px' }}>성명</th>
+                                         <th style={{ width: '60px' }}>학번</th>
+                                         <th style={{ width: '60px' }}>성명</th>
                                         {page.businessDays.map(day => (
                                             <th key={day.toString()} colSpan={page.sessions.length}>
                                                 {format(day, 'MM/dd')} ({format(day, 'E', { locale: ko })[0]})
@@ -526,7 +533,7 @@ const AttendancePrint = () => {
                                         <th colSpan={3}>학습차시</th>
                                         {page.businessDays.map(day => 
                                             page.sessions.map(s => (
-                                                <th key={`${day}-${s.id}`} style={{ fontSize: '8px', padding: '2px 0' }}>{s.name}</th>
+                                                 <th key={`${day}-${s.id}`} style={{ fontSize: '8px', padding: '2px 0', whiteSpace: 'nowrap' }}>{s.name}</th>
                                             ))
                                         )}
                                     </tr>
@@ -545,15 +552,33 @@ const AttendancePrint = () => {
                                                 const dateStr = format(day, 'yyyy-MM-dd');
                                                 return page.sessions.map(s => {
                                                     const booking = page.bookings.find(b => 
-                                                        b.user_id === student.id && 
+                                                        b.student_id === student.id && 
                                                         b.date === dateStr && 
                                                         b.session_id === s.id
                                                     );
                                                     const attStatus = booking?.attendance?.[0]?.status;
-                                                    const displayText = attStatus === 'present' ? 'O' : attStatus === 'late' ? '△' : attStatus === 'early' ? '조' : booking ? '' : '-';
+                                                    const todayStr = format(new Date(), 'yyyy-MM-dd');
                                                     
-                                                    return (
-                                                        <td key={`${student.id}-${dateStr}-${s.id}`} style={{ fontSize: '9px', color: attStatus === 'absent' ? '#ff3b30' : 'inherit' }}>
+                                                    let finalAttStatus = attStatus;
+                                                    // Logic: If booking exists for past date but no attendance record, it's 'absent'
+                                                    if (booking && !attStatus && dateStr < todayStr) {
+                                                        finalAttStatus = 'absent';
+                                                    }
+
+                                                     const displayText = finalAttStatus === 'present' ? 'O' : 
+                                                                         finalAttStatus === 'late' ? '△' : 
+                                                                         finalAttStatus === 'early' ? '/' : 
+                                                                         finalAttStatus === 'absent' ? 'Ｘ' : 
+                                                                         booking ? '' : '-';
+                                                    
+                                                    const getStatusColor = () => {
+                                                        if (finalAttStatus === 'absent' || finalAttStatus === 'early') return '#ff3b30';
+                                                        if (finalAttStatus === 'late') return '#007aff';
+                                                        return 'inherit';
+                                                    };
+                                                    
+                                                     return (
+                                                        <td key={`${student.id}-${dateStr}-${s.id}`} style={{ fontSize: '10px', fontWeight: 'bold', color: getStatusColor() }}>
                                                             {displayText}
                                                         </td>
                                                     );

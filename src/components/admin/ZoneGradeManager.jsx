@@ -178,8 +178,8 @@ const ZoneGradeManager = () => {
                                 <ShieldCheck className="w-6 h-6 text-white" />
                             </div>
                             <div>
-                                <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">Zone별 학년 지정</h2>
-                                <p className="text-sm text-ios-gray font-bold">세부 구역(Zone A, B, C 등)을 특정 학년 전용으로 제한합니다.</p>
+                                <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">구역별 학년 지정</h2>
+                                <p className="text-sm text-ios-gray font-bold">세부 구역(Section A, B, C 등)을 특정 학년 전용으로 제한합니다.</p>
                             </div>
                         </div>
                     </div>
