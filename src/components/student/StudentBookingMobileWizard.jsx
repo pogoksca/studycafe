@@ -23,7 +23,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const [selectedZoneId, setSelectedZoneId] = useState(null);
   const [selectedSeatNumber, setSelectedSeatNumber] = useState('');
   const [selectedSection, setSelectedSection] = useState('A'); // Default section
-  const [studyContent, setStudyContent] = useState('');
+  const [studyContent, setStudyContent] = useState({}); // Changed to Object: { [sessionId]: string }
   const [restrictionSettings, setRestrictionSettings] = useState({ enabled: false, restrictions: {} });
 
   // Management State
@@ -502,7 +502,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
       };
 
       return (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-4 animate-fade-in">
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
               <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl relative">
                   <div className="p-6">
                       <div className="flex items-center justify-between mb-6">
@@ -912,19 +912,43 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
 
   // Step 5: Content
   const renderContentStep = () => {
+      // Sort selected sessions by time (assuming ID order implies time or sort explicitly if needed)
+      // Since operationalSessions is already sorted, we can filter from it
+      const selectedSessions = operationalSessions.filter(s => selectedSessionIds.includes(s.id));
+
       return (
-        <div className="space-y-4 animate-fade-in">
-             <h3 className="text-xl font-black text-[#1C1C1E]">학습 내용</h3>
-             <p className="text-sm font-bold text-ios-gray">
-                 해당 시간에 계획하고 있는 학습 내용을 간단히 적어주세요.
-             </p>
+        <div className="space-y-6 animate-fade-in">
+             <div>
+                <h3 className="text-xl font-black text-[#1C1C1E]">학습 내용</h3>
+                <p className="text-sm font-bold text-ios-gray">
+                    각 교시(세션)별로 계획하신 학습 내용을 입력해주세요.
+                </p>
+             </div>
              
-             <textarea 
-                value={studyContent}
-                onChange={(e) => setStudyContent(e.target.value)}
-                placeholder="예: 수학의 정석 2단원 문제풀이, 영어 단어 50개 암기 등"
-                className="w-full h-48 bg-white border border-gray-200 rounded-2xl p-5 text-base font-medium resize-none focus:ring-2 focus:ring-ios-indigo/20 outline-none transition-all shadow-sm"
-             />
+             <div className="space-y-4">
+                {selectedSessions.map((session, index) => (
+                    <div key={session.id} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="w-6 h-6 rounded-full bg-ios-indigo text-white flex items-center justify-center text-xs font-black">
+                                {index + 1}
+                            </div>
+                            <h4 className="text-base font-black text-[#1C1C1E]">{session.name}</h4>
+                            <span className="text-xs font-bold text-ios-gray ml-auto">
+                                {session.start_time.slice(0,5)} ~ {session.end_time.slice(0,5)}
+                            </span>
+                        </div>
+                        <textarea 
+                            value={studyContent[session.id] || ''}
+                            onChange={(e) => setStudyContent(prev => ({
+                                ...prev,
+                                [session.id]: e.target.value
+                            }))}
+                            placeholder={`${session.name} 시간에 학습할 내용을 입력하세요 (예: 수학 2단원)`}
+                            className="w-full h-24 bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm font-medium resize-none focus:ring-2 focus:ring-ios-indigo/20 outline-none transition-all"
+                        />
+                    </div>
+                ))}
+             </div>
         </div>
       );
   };
@@ -933,7 +957,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const renderReviewStep = () => {
       const dateStr = selectedDate ? format(selectedDate, 'M월 d일 (EEE)', { locale: ko }) : '';
       const zoneName = zones.find(z => z.id === selectedZoneId)?.name;
-      const sessionNames = operationalSessions.filter(s => selectedSessionIds.includes(s.id)).map(s => s.name).join(', ');
+      const selectedSessions = operationalSessions.filter(s => selectedSessionIds.includes(s.id));
 
       return (
         <div className="space-y-6 animate-fade-in">
@@ -957,7 +981,9 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                          </div>
                          <div>
                              <p className="text-xs font-bold text-ios-gray">세션</p>
-                             <p className="text-lg font-black text-[#1C1C1E]">{sessionNames}</p>
+                             <p className="text-lg font-black text-[#1C1C1E]">
+                                {selectedSessions.map(s => s.name).join(', ')}
+                             </p>
                          </div>
                      </div>
 
@@ -976,11 +1002,18 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                          <div className="w-10 h-10 rounded-full bg-ios-amber/10 flex items-center justify-center shrink-0">
                              <BookOpen className="w-5 h-5 text-ios-amber" />
                          </div>
-                         <div>
-                             <p className="text-xs font-bold text-ios-gray">학습 계획</p>
-                             <p className="text-sm font-medium text-[#1C1C1E] leading-relaxed line-clamp-3">
-                                 {studyContent || '입력 없음'}
-                             </p>
+                         <div className="flex-1">
+                             <p className="text-xs font-bold text-ios-gray mb-2">학습 계획</p>
+                             <div className="space-y-2">
+                                {selectedSessions.map(s => (
+                                    <div key={s.id} className="flex gap-2 text-sm">
+                                        <span className="font-bold text-ios-gray min-w-[3rem]">{s.name}:</span>
+                                        <span className="font-medium text-[#1C1C1E] line-clamp-1">
+                                            {studyContent[s.id] || '입력 없음'}
+                                        </span>
+                                    </div>
+                                ))}
+                             </div>
                          </div>
                      </div>
                  </div>
@@ -1002,7 +1035,11 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
         case 1: return !!selectedZoneId; // Step 1: Zone
         case 2: return !!selectedSeatNumber; // Step 2: Seat
         case 3: return selectedSessionIds.length > 0; // Step 3: Session
-        case 4: return !!studyContent.trim();
+        case 4: 
+            // All selected sessions must have some content (optional: or at least one?)
+            // Let's enforce content for all sessions for better data
+            const selectedSessions = selectedSessionIds;
+            return selectedSessions.every(sid => (studyContent[sid] || '').trim().length > 0);
         default: return true;
     }
   };
@@ -1015,7 +1052,8 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
           if (restrictionSettings.enabled) {
               const spaceRestr = restrictionSettings.restrictions[selectedZoneId] || {};
               const permittedGrades = spaceRestr[selectedSection];
-              const studentGrade = parseInt((currentUser?.username || '').substring(0,1));
+              const studentIdStr = currentUser?.student_id || currentUser?.username || '';
+              const studentGrade = parseInt(studentIdStr.substring(0,1));
 
               if (permittedGrades && Array.isArray(permittedGrades) && permittedGrades.length > 0) {
                   if (!permittedGrades.includes(studentGrade)) {
@@ -1065,17 +1103,17 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
         return;
       }
 
-      // 2. Transact Bookings and Study Plans via Secure RPC
+      // 2. Transact Bookings and Study Plans via Secure RPC (V2)
       // This solves RLS (SECURITY DEFINER) and Atomicity (all or nothing)
       const studentUserId = isStudent ? (currentUser.user_id || null) : null;
       
-      const { error: rpcError } = await supabase.rpc('manage_booking_v1', {
+      const { error: rpcError } = await supabase.rpc('manage_booking_v2', {
         p_user_id: isStudent ? studentUserId : currentUser.id,
         p_student_id: isStudent ? currentUser.id : null,
         p_date: formattedDate,
         p_session_ids: uniqueSessionIds,
         p_seat_id: targetSeatId,
-        p_study_content: studyContent,
+        p_study_contents: studyContent, // Passing JSONB object: { "sessionId": "content" }
         p_old_booking_ids: editingBookingIds || []
       });
 

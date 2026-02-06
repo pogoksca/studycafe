@@ -31,6 +31,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     earlyLeave: 0,
     history: []
   });
+  const [quarterInfo, setQuarterInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exceptions, setExceptions] = useState([]); // Holiday/Exceptions
 
@@ -189,8 +190,39 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
       // 4. stats Tab
       if (activeTab === 'stats' || loading) {
-        const qStart = format(startOfQuarter(new Date()), 'yyyy-MM-dd');
-        const qEnd = format(endOfQuarter(new Date()), 'yyyy-MM-dd');
+
+        // Fetch Configured Quarters
+        const { data: quarters } = await supabase
+            .from('operation_quarters')
+            .select('*')
+            .order('academic_year', { ascending: true })
+            .order('quarter', { ascending: true });
+        
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        let currentQ = null;
+        let qStart = format(startOfQuarter(new Date()), 'yyyy-MM-dd');
+        let qEnd = format(endOfQuarter(new Date()), 'yyyy-MM-dd');
+
+        if (quarters && quarters.length > 0) {
+            // Find current quarter
+            currentQ = quarters.find(q => todayStr >= q.start_date && todayStr <= q.end_date);
+            
+            // Fallback: closest quarter if not in range (optional, but good for consistency)
+            if (!currentQ) {
+               const today = new Date();
+               currentQ = quarters.reduce((prev, curr) => {
+                   const prevDist = Math.abs(new Date(prev.start_date) - today);
+                   const currDist = Math.abs(new Date(curr.start_date) - today);
+                   return currDist < prevDist ? curr : prev;
+               });
+            }
+
+            if (currentQ) {
+                qStart = currentQ.start_date;
+                qEnd = currentQ.end_date;
+                setQuarterInfo(currentQ);
+            }
+        }
         
         // Fetch both bookings and study plans for the quarter
         const [bookingsRes, plansRes] = await Promise.all([
@@ -461,7 +493,13 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     return (
       <div className="p-5 space-y-6 animate-fade-in scrollbar-hide">
         <div className="glass-card p-8 relative overflow-hidden">
-            <div className="flex items-center gap-2 mb-6 text-ios-indigo"><BarChart3 className="w-4 h-4" /><h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3></div>
+            <div className="flex items-center gap-2 mb-2 text-ios-indigo"><BarChart3 className="w-4 h-4" /><h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3></div>
+            <p className="text-[11px] font-bold text-ios-gray mb-6 pl-6">
+                {quarterInfo 
+                    ? `${quarterInfo.quarter}분기: ${format(new Date(quarterInfo.start_date), 'yyyy-MM-dd(EEE)', { locale: ko })} ~ ${format(new Date(quarterInfo.end_date), 'yyyy-MM-dd(EEE)', { locale: ko })}`
+                    : `${Math.ceil((new Date().getMonth() + 1) / 3)}분기: ${format(startOfQuarter(new Date()), 'yyyy-MM-dd(EEE)', { locale: ko })} ~ ${format(endOfQuarter(new Date()), 'yyyy-MM-dd(EEE)', { locale: ko })}`
+                }
+            </p>
             <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col items-center p-4 bg-ios-emerald/5 rounded-apple">
                     <span className="text-[10px] font-black text-ios-emerald uppercase opacity-60 mb-1">이수</span>
