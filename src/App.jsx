@@ -16,6 +16,7 @@ import OperationManager from './components/admin/OperationManager'
 import SystemSettings from './components/admin/SystemSettings'
 import AttendancePrint from './components/admin/AttendancePrint'
 import ZoneManagement from './components/admin/ZoneManagement'
+import ZoneGradeManager from './components/admin/ZoneGradeManager'
 import SeatMapModal from './components/booking/SeatMapModal'
 import { supabase } from './lib/supabase'
 import { format, parseISO } from 'date-fns'
@@ -23,11 +24,11 @@ import { format, parseISO } from 'date-fns'
 
 function App() {
   const [activeTab, setActiveTab] = useState(() => {
-    const savedTab = localStorage.getItem('activeTab');
+    const savedTab = sessionStorage.getItem('activeTab');
     if (savedTab) return savedTab;
     
-    // Check initial user from localStorage to decide default landing page
-    const savedUserStr = localStorage.getItem('currentUser');
+    // Check initial user from sessionStorage to decide default landing page
+    const savedUserStr = sessionStorage.getItem('currentUser');
     if (savedUserStr) {
       try {
         const user = JSON.parse(savedUserStr);
@@ -39,17 +40,17 @@ function App() {
     return 'map';
   })
   const [adminSubTab, setAdminSubTab] = useState(() => {
-    return localStorage.getItem('adminSubTab') || 'attendance';
+    return sessionStorage.getItem('adminSubTab') || 'attendance';
   })
   const [selectedSeat, setSelectedSeat] = useState(null)
   const [currentUser, setCurrentUser] = useState(() => {
-    const savedUser = localStorage.getItem('currentUser');
+    const savedUser = sessionStorage.getItem('currentUser');
     return savedUser ? JSON.parse(savedUser) : null;
   })
   const [viewDate, setViewDate] = useState(format(new Date(), 'yyyy-MM-dd')); // Global date state for seat map
   const [selectedZoneId, setSelectedZoneId] = useState(null); // Global state for current zone
   const [schoolInfo, setSchoolInfo] = useState(() => {
-    const saved = localStorage.getItem('schoolInfo');
+    const saved = sessionStorage.getItem('schoolInfo');
     return saved ? JSON.parse(saved) : { name: 'POGOK', name_en: 'POGOK', level: '고등학교' };
   });
   
@@ -120,61 +121,35 @@ function App() {
         .single();
       if (data?.value) {
         setSchoolInfo(data.value);
-        localStorage.setItem('schoolInfo', JSON.stringify(data.value));
+        sessionStorage.setItem('schoolInfo', JSON.stringify(data.value));
       }
     };
     fetchSchoolInfo();
   }, []);
 
-  // Persist session to localStorage
+  // Persist session to sessionStorage
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem('currentUser', JSON.stringify(currentUser));
+      sessionStorage.setItem('currentUser', JSON.stringify(currentUser));
     } else {
-      localStorage.removeItem('currentUser');
+      sessionStorage.removeItem('currentUser');
     }
   }, [currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('activeTab', activeTab);
+    sessionStorage.setItem('activeTab', activeTab);
   }, [activeTab]);
 
   useEffect(() => {
-    localStorage.setItem('adminSubTab', adminSubTab);
+    sessionStorage.setItem('adminSubTab', adminSubTab);
   }, [adminSubTab]);
 
-  // --- 자동 로그아웃 로직 (30분 미활동 시) ---
+  // Cleanup legacy localStorage entries
   useEffect(() => {
-    let timeoutId;
-    // 30분 (30분 * 60초 * 1000밀리초)
-    const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
+    const legacyKeys = ['currentUser', 'activeTab', 'adminSubTab', 'schoolInfo', 'schoolName'];
+    legacyKeys.forEach(key => localStorage.removeItem(key));
+  }, []);
 
-    const resetTimer = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (currentUser) {
-        timeoutId = setTimeout(() => {
-          handleLogout();
-          alert('장시간 활동이 없어 보안을 위해 자동 로그아웃되었습니다.');
-        }, INACTIVITY_TIMEOUT);
-      }
-    };
-
-    const activityEvents = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
-
-    if (currentUser) {
-      resetTimer();
-      activityEvents.forEach(event => {
-        window.addEventListener(event, resetTimer);
-      });
-    }
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      activityEvents.forEach(event => {
-        window.removeEventListener(event, resetTimer);
-      });
-    };
-  }, [currentUser]);
 
   const handleZoneChange = (zoneId) => {
     setSelectedZoneId(zoneId);
@@ -183,9 +158,9 @@ function App() {
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('currentUser');
-    localStorage.removeItem('activeTab');
-    localStorage.removeItem('adminSubTab');
+    sessionStorage.removeItem('currentUser');
+    sessionStorage.removeItem('activeTab');
+    sessionStorage.removeItem('adminSubTab');
     setActiveTab('map');
   };
 
@@ -222,6 +197,7 @@ function App() {
       items: [
         { id: 'zones', label: '학습 공간 관리', icon: Box, roles: ['admin'] },
         { id: 'layout', label: '공간 배치 편집', icon: Map, roles: ['admin'] },
+        { id: 'zone_grades', label: 'Zone별 학년 지정', icon: ShieldCheck, roles: ['admin'] },
         { id: 'students', label: '학생 명단 관리', icon: Users, roles: ['admin'] },
         { id: 'schedule', label: '운영 일정 설정', icon: Calendar, roles: ['admin'] },
       ]
@@ -428,6 +404,7 @@ function App() {
             <div className="flex-1 bg-[#F2F2F7] p-6 overflow-hidden">
               <div className="h-full w-full rounded-2xl overflow-hidden shadow-sm border border-black/5 bg-white">
                 {adminSubTab === 'zones' ? <ZoneManagement /> :
+                 adminSubTab === 'zone_grades' ? <ZoneGradeManager /> :
                  adminSubTab === 'layout' ? <FloorPlanEditor /> : 
                  adminSubTab === 'attendance' ? <AttendanceManager /> : 
                  adminSubTab === 'attendance_print' ? <AttendancePrint /> :

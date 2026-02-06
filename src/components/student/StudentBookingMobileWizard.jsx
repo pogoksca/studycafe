@@ -24,6 +24,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const [selectedSeatNumber, setSelectedSeatNumber] = useState('');
   const [selectedSection, setSelectedSection] = useState('A'); // Default section
   const [studyContent, setStudyContent] = useState('');
+  const [restrictionSettings, setRestrictionSettings] = useState({ enabled: false, restrictions: {} });
 
   // Management State
   const [manageDate, setManageDate] = useState(null);
@@ -81,6 +82,17 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             setSelectedZoneId(initialZoneId);
         }
 
+        // 3. Grade Restriction Configs
+        const [configRes, restrRes] = await Promise.all([
+          supabase.from('configs').select('value').eq('key', 'grade_restriction_enabled').maybeSingle(),
+          supabase.from('configs').select('value').eq('key', 'sub_zone_grade_restrictions').maybeSingle()
+        ]);
+        
+        setRestrictionSettings({
+          enabled: !!configRes.data?.value,
+          restrictions: restrRes.data?.value || {}
+        });
+
         // (Sessions and Rules will be fetched via useEffect when selectedZoneId is set)
 
       } catch (err) {
@@ -130,9 +142,8 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
             // Auto-detect initial section if possible
             const seats = seatsRes.data || [];
             if (seats.length > 0) {
-                // Use explicit zone_name for Section (User Correction)
-                // If zone_name is empty/null, fallback to '일반'
-                const firstSection = seats[0].zone_name || '일반';
+                // Use explicit zone_name for Section. If no sub-zones, use empty string.
+                const firstSection = seats[0].zone_name || '';
                 setSelectedSection(firstSection);
             }
 
@@ -697,8 +708,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
            if (!zoneSeats || zoneSeats.length === 0) return [];
            const sections = new Set();
            zoneSeats.forEach(s => {
-               // Use zone_name explicitly (User Correction)
-               sections.add(s.zone_name || '일반');
+               if (s.zone_name) sections.add(s.zone_name);
            });
            
            return Array.from(sections).sort();
@@ -714,19 +724,19 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
 
            let nextIndex;
            if (direction === 'up') {
-               nextIndex = (currentIndex + 1) % sections.length;
-           } else {
                nextIndex = (currentIndex - 1 + sections.length) % sections.length;
+           } else {
+               nextIndex = (currentIndex + 1) % sections.length;
            }
            
            const nextSection = sections[nextIndex];
            setSelectedSection(nextSection);
            
            // Reset seat number when section changes
-           const firstSeatOfSection = zoneSeats.find(s => (s.zone_name || '일반') === nextSection);
+           const first_seat = zoneSeats.find(s => (s.zone_name || '') === nextSection);
            
-           if (firstSeatOfSection) {
-               setSelectedSeatNumber(getCleanSeatNumber(firstSeatOfSection));
+           if (first_seat) {
+               setSelectedSeatNumber(getCleanSeatNumber(first_seat));
            } else {
                setSelectedSeatNumber('');
            }
@@ -739,7 +749,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
 
            // Filter by zone_name
            const SectionSeats = zoneSeats.filter(s => {
-               const sName = s.zone_name || '일반';
+               const sName = s.zone_name || '';
                return sName === currentSec;
            });
            
@@ -758,9 +768,9 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
            if (currentSeat) {
                const currentIndex = sortedSeats.indexOf(currentSeat);
                if (direction === 'up') {
-                   nextIndex = (currentIndex + 1) % sortedSeats.length;
-               } else {
                    nextIndex = (currentIndex - 1 + sortedSeats.length) % sortedSeats.length;
+               } else {
+                   nextIndex = (currentIndex + 1) % sortedSeats.length;
                }
            } else {
                nextIndex = 0;
@@ -771,6 +781,11 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
        };
 
        const currentSectionDisplay = selectedSection || (sections.length > 0 ? sections[0] : '-');
+       
+       // Helper for Name and Grade display
+       const studentName = currentUser?.full_name || currentUser?.name || '학생';
+       const studentId = currentUser?.student_id || currentUser?.username || '';
+       const studentGrade = parseInt(studentId.substring(0, 1)) || '';
 
        return (
          <div className="space-y-4 animate-fade-in">
@@ -780,6 +795,40 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
               <p className="text-sm font-bold text-ios-gray">
                   구역(Section)을 선택한 후 번호를 입력해주세요.
               </p>
+
+              {/* Grade Guidance Message - Personalized and Fixed Grade Logic */}
+              <div className="bg-ios-rose/5 p-4 rounded-2xl border border-ios-rose/10 flex items-start gap-3 mt-2 animate-fade-in">
+                  <div className="mt-0.5">
+                      <Info className="w-4 h-4 text-ios-rose" />
+                  </div>
+                  <p className="text-[11px] font-bold text-[#1C1C1E] leading-relaxed">
+                      {studentName}님의 학년({studentGrade || '?'}학년)이 이용 가능한 구역을 선택해주세요.
+                      <br/>
+                      <span className="text-ios-rose font-bold whitespace-pre-wrap">
+                          {(() => {
+                              if (!restrictionSettings.enabled) return "현재 모든 구역을 자유롭게 이용할 수 있습니다.";
+                              
+                              const spaceRestr = restrictionSettings.restrictions[selectedZoneId] || {};
+                              const allowedAreas = Object.keys(spaceRestr).filter(area => 
+                                  {
+                                      const grades = spaceRestr[area];
+                                      return Array.isArray(grades) && grades.includes(studentGrade);
+                                  }
+                              );
+                              const restrictedAreas = Object.keys(spaceRestr).filter(area => 
+                                  {
+                                      const grades = spaceRestr[area];
+                                      return Array.isArray(grades) && !grades.includes(studentGrade);
+                                  }
+                              );
+
+                              if (allowedAreas.length === 0 && restrictedAreas.length > 0) return "학습 공간 내 모든 구역이 이용 불가능합니다.";
+                              if (restrictedAreas.length === 0) return "현재 학습 공간의 모든 구역을 이용할 수 있습니다.";
+                              return `${allowedAreas.join(', ')} 구역을 이용하실 수 있습니다. (${restrictedAreas.join(', ')} 제외)`;
+                          })()}
+                      </span>
+                  </p>
+              </div>
 
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 mt-4">
                  <div className="flex gap-4">
@@ -961,6 +1010,21 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
   const handleNext = () => {
       if (currentStep === 0 && editingBookingIds) {
           setCurrentStep(3); // Jump to Session step in edit mode
+      } else if (currentStep === 2) {
+          // Validate Grade Restriction for Sub-Zone
+          if (restrictionSettings.enabled) {
+              const spaceRestr = restrictionSettings.restrictions[selectedZoneId] || {};
+              const permittedGrades = spaceRestr[selectedSection];
+              const studentGrade = parseInt((currentUser?.username || '').substring(0,1));
+
+              if (permittedGrades && Array.isArray(permittedGrades) && permittedGrades.length > 0) {
+                  if (!permittedGrades.includes(studentGrade)) {
+                      alert(`'${selectedSection}' 구역은 ${permittedGrades.sort().join(', ')}학년 전용 공간입니다.`);
+                      return;
+                  }
+              }
+          }
+          setCurrentStep(p => p + 1);
       } else if (currentStep < 5 && canProceed()) {
           setCurrentStep(p => p + 1);
       }

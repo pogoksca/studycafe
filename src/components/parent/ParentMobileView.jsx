@@ -349,8 +349,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                     const isCur = isSameDay(day, new Date());
                     
                     let bgClass = isCur 
-                        ? 'bg-ios-indigo text-white shadow-md' 
-                        : 'bg-white border border-gray-100 text-gray-300';
+                        ? (status 
+                            ? 'bg-ios-indigo text-white shadow-md' 
+                            : 'bg-white/50 border border-white/40 text-[#1C1C1E]') 
+                        : 'bg-white/50 border border-white/40 text-gray-300';
 
                     if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
                         bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
@@ -373,7 +375,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                     return (
                         <div 
                             key={i} 
-                            className={`flex flex-col items-center gap-1.5 ${dayData ? 'cursor-pointer' : ''}`}
+                            className={`flex flex-col items-center gap-4 ${dayData ? 'cursor-pointer' : ''}`}
                             onClick={() => dayData && setManageDate(day)}
                         >
                             <span className={`text-[11px] font-black ${labelColor}`}>
@@ -387,6 +389,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                     <span className={`text-[11px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${status.color}`}>
                                         {status.label}
                                     </span>
+                                ) : isCur ? (
+                                    <span className="text-[11px] font-black text-ios-indigo">오늘</span>
                                 ) : (
                                     <div className="w-1 h-1 rounded-full bg-transparent" />
                                 )}

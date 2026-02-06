@@ -118,7 +118,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
     const parentSigPad = React.useRef(null);
 
     const [schoolName, setSchoolName] = useState(() => {
-        return localStorage.getItem('schoolName') || 'GOE';
+        return sessionStorage.getItem('schoolName') || 'GOE';
     });
 
     useEffect(() => {
@@ -130,7 +130,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                 .single();
             if (data?.value) {
                 setSchoolName(data.value.name_en || 'GOE');
-                localStorage.setItem('schoolInfo', JSON.stringify(data.value));
+                sessionStorage.setItem('schoolInfo', JSON.stringify(data.value));
             }
         };
         fetchSchoolInfo();

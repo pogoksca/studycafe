@@ -46,6 +46,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
   const [seatDayBookings, setSeatDayBookings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [restrictionSettings, setRestrictionSettings] = useState({ enabled: false, restrictions: {} });
 
   useEffect(() => {
     if (initialDate) {
@@ -108,6 +109,17 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
         const { data: qData } = await supabase.from('operation_quarters').select('*');
         setOpData(prev => ({ ...prev, quarters: qData || [] }));
       }
+
+      // Fetch grade restriction settings
+      const [configRes, restrictionsRes] = await Promise.all([
+          supabase.from('configs').select('value').eq('key', 'grade_restriction_enabled').maybeSingle(),
+          supabase.from('configs').select('value').eq('key', 'sub_zone_grade_restrictions').maybeSingle()
+      ]);
+
+      setRestrictionSettings({
+          enabled: !!configRes.data?.value,
+          restrictions: restrictionsRes.data?.value || {}
+      });
     };
     init();
   }, [selectedSeat, currentZoneId, targetUser]); // Added targetUser to trigger re-init if needed
@@ -197,6 +209,22 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
             if (existingSeatId !== selectedSeat.id) {
                 setError(`오늘 이미 ${userDayBookings[0].seat_number}번 좌석을 예약하셨습니다.`);
                 return;
+            }
+        }
+
+        // Grade restriction check
+        if (restrictionSettings.enabled && selectedSeat) {
+            const spaceRestrictions = restrictionSettings.restrictions[selectedSeat.zone_id] || {};
+            const permittedGrades = spaceRestrictions[selectedSeat.zone_name]; // Now an array [1, 2]
+            
+            if (permittedGrades && Array.isArray(permittedGrades) && permittedGrades.length > 0) {
+                const studentId = currentUser?.username || '';
+                const studentGrade = parseInt(studentId.substring(0, 1));
+                
+                if (!permittedGrades.includes(studentGrade)) {
+                    setError(`'${selectedSeat.zone_name}' 구역은 ${permittedGrades.sort().join(', ')}학년 전용 공간입니다.`);
+                    return;
+                }
             }
         }
     }

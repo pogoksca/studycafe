@@ -236,7 +236,7 @@ const ZoneManagement = () => {
                         <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-3">
                                 <Layout className="w-5 h-5 text-ios-amber" />
-                                <h3 className="text-lg font-black text-[#1C1C1E]">학습 공간(Zone) 리스트</h3>
+                                <h3 className="text-lg font-black text-[#1C1C1E]">학습 공간 리스트</h3>
                             </div>
                             <button 
                                 onClick={addZone}
