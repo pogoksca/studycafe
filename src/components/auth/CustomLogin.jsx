@@ -202,13 +202,9 @@ const CustomLogin = ({ onLoginSuccess }) => {
             .eq('student_id', inputId);
 
         if (fetchError) {
-            alert(`Query Error: ${fetchError.message}`); // Debug
             setError('서버 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
             return;
         }
-
-        // Debug Alert for Mobile - Check strictly what is being sent
-        alert(`Debug: InputID=[${inputId}] InputName=[${inputName}] Found=[${applicants?.length}]`);
 
         if (!applicants || applicants.length === 0) {
             setError('등록되지 않은 학번입니다.');
@@ -225,10 +221,6 @@ const CustomLogin = ({ onLoginSuccess }) => {
         });
 
         if (!matchedApplicant) {
-            // Debug info
-            const foundNames = applicants.map(a => a.name).join(', ');
-            alert(`학번 일치, 이름 불일치.\n입력이름: [${inputName}]\nDB이름: [${foundNames}]`); // Helpful debug
-            
             setError('학번은 존재하나 이름이 일치하지 않습니다. (입력한 이름 확인)');
             return;
         }
