@@ -387,12 +387,12 @@ const SafetySupervision = () => {
                 </div>
 
                 {/* Zone Selection */}
-                <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200">
+                <div className="flex items-center gap-2">
                     {zones.map(z => (
                         <button
                             key={z.id}
                             onClick={() => setSelectedZoneId(z.id)}
-                            className={`px-4 py-1.5 rounded-lg text-xs font-black transition-all ios-tap ${
+                            className={`px-4 py-2 rounded-lg text-xs font-black transition-all ios-tap ${
                                 selectedZoneId === z.id ? 'bg-[#1C1C1E] text-white shadow-md' : 'text-ios-gray hover:text-[#1C1C1E]'
                             }`}
                         >

@@ -248,39 +248,90 @@ const AttendancePrint = () => {
                         </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        {/* 1. Quarter Selection */}
-                        <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100 flex flex-col">
-                            <div className="flex items-center gap-2 mb-6">
-                                <Calendar className="w-4 h-4 text-ios-indigo" />
-                                <h3 className="text-sm font-black text-[#1C1C1E] uppercase tracking-wider">분기 선택</h3>
+                    <div className="space-y-8">
+                        {/* Row 1: Quarter & Week Selection (Equal Height) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            {/* 1. Quarter Selection */}
+                            <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100 flex flex-col h-full">
+                                <div className="flex items-center gap-2 mb-6">
+                                    <Calendar className="w-4 h-4 text-ios-indigo" />
+                                    <h3 className="text-sm font-black text-[#1C1C1E] uppercase tracking-wider">분기 선택</h3>
+                                </div>
+                                <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar max-h-[300px]">
+                                    {quarters.map(q => (
+                                        <button
+                                            key={q.id}
+                                            onClick={() => handleQuarterChange(q)}
+                                            className={`w-full text-left p-4 rounded-xl border-2 transition-all flex items-center justify-between group ${
+                                                selectedQuarter?.id === q.id 
+                                                    ? 'bg-ios-indigo/5 border-ios-indigo text-ios-indigo' 
+                                                    : 'bg-white border-gray-50 text-ios-gray hover:border-gray-200'
+                                            }`}
+                                        >
+                                            <div>
+                                                <p className="text-[13px] font-black">{q.quarter_name} ({q.academic_year}학년도)</p>
+                                                <p className="text-[11px] opacity-70 mt-0.5">
+                                                    {format(new Date(q.start_date), 'yyyy-MM-dd(eee)', { locale: ko })} ~ {format(new Date(q.end_date), 'yyyy-MM-dd(eee)', { locale: ko })}
+                                                </p>
+                                            </div>
+                                            {selectedQuarter?.id === q.id && <CheckCircle2 className="w-5 h-5" />}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                                {quarters.map(q => (
-                                    <button
-                                        key={q.id}
-                                        onClick={() => handleQuarterChange(q)}
-                                        className={`w-full text-left p-4 rounded-xl border-2 transition-all flex items-center justify-between group ${
-                                            selectedQuarter?.id === q.id 
-                                                ? 'bg-ios-indigo/5 border-ios-indigo text-ios-indigo' 
-                                                : 'bg-white border-gray-50 text-ios-gray hover:border-gray-200'
-                                        }`}
-                                    >
-                                        <div>
-                                            <p className="text-[13px] font-black">{q.quarter_name} ({q.academic_year}학년도)</p>
-                                            <p className="text-[11px] opacity-70 mt-0.5">
-                                                {format(new Date(q.start_date), 'yyyy-MM-dd(eee)', { locale: ko })} ~ {format(new Date(q.end_date), 'yyyy-MM-dd(eee)', { locale: ko })}
+
+                             {/* 2. Week Selection */}
+                            <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100 flex flex-col h-full">
+                                <div className="flex items-center justify-between mb-6">
+                                    <div className="flex items-center gap-2">
+                                        <FileText className="w-4 h-4 text-ios-indigo" />
+                                        <h3 className="text-sm font-black text-[#1C1C1E] uppercase tracking-wider">출력 주차 선택</h3>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={() => setSelectedWeeks(weeks.map(w => w.id))}
+                                            className="text-[11px] font-black text-ios-indigo hover:underline"
+                                        >
+                                            전체
+                                        </button>
+                                        <span className="text-gray-200">|</span>
+                                        <button 
+                                            onClick={() => setSelectedWeeks([])}
+                                            className="text-[11px] font-black text-ios-rose hover:underline"
+                                        >
+                                            해제
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 flex-1 overflow-y-auto pr-2 custom-scrollbar max-h-[300px]">
+                                    {weeks.map(w => (
+                                        <button
+                                            key={w.id}
+                                            onClick={() => toggleWeek(w.id)}
+                                            className={`relative p-4 rounded-2xl border-2 transition-all group ${
+                                                selectedWeeks.includes(w.id)
+                                                    ? 'bg-ios-indigo/5 border-ios-indigo'
+                                                    : 'bg-white border-gray-100 hover:border-gray-200'
+                                            }`}
+                                        >
+                                            <p className={`text-[13px] font-black ${selectedWeeks.includes(w.id) ? 'text-ios-indigo' : 'text-[#1C1C1E]'}`}>{w.id}주차</p>
+                                            <p className="text-[10px] text-ios-gray font-bold mt-1">
+                                                {format(w.start, 'MM/dd(eee)', { locale: ko })} - {format(w.end, 'MM/dd(eee)', { locale: ko })}
                                             </p>
-                                        </div>
-                                        {selectedQuarter?.id === q.id && <CheckCircle2 className="w-5 h-5" />}
-                                    </button>
-                                ))}
+                                            {selectedWeeks.includes(w.id) && (
+                                                <div className="absolute top-2 right-2 flex items-center justify-center w-5 h-5 rounded-full bg-ios-indigo text-white shadow-sm scale-110">
+                                                    <Check className="w-3 h-3" strokeWidth={4} />
+                                                </div>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         </div>
 
-                        {/* 2. Grade & Session Selection */}
-                        <div className="space-y-6">
-                            {/* Grades */}
+                        {/* Row 2: Grade & Session Selection */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+                            {/* 3. Grade Filter */}
                             <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100">
                                 <div className="flex items-center gap-2 mb-6">
                                     <Users className="w-4 h-4 text-ios-indigo" />
@@ -304,7 +355,7 @@ const AttendancePrint = () => {
                                 </div>
                             </div>
 
-                            {/* Sessions */}
+                            {/* 4. Sessions */}
                             <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100">
                                 <div className="flex items-center gap-2 mb-6">
                                     <Clock className="w-4 h-4 text-ios-indigo" />
@@ -327,54 +378,6 @@ const AttendancePrint = () => {
                                     ))}
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    {/* 3. Week Selection */}
-                    <div className="bg-white rounded-[24px] p-6 shadow-sm border border-gray-100">
-                        <div className="flex items-center justify-between mb-6">
-                            <div className="flex items-center gap-2">
-                                <FileText className="w-4 h-4 text-ios-indigo" />
-                                <h3 className="text-sm font-black text-[#1C1C1E] uppercase tracking-wider">출력 주차 선택 (A4 1장/주)</h3>
-                            </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={() => setSelectedWeeks(weeks.map(w => w.id))}
-                                    className="text-[11px] font-black text-ios-indigo hover:underline"
-                                >
-                                    전체 선택
-                                </button>
-                                <span className="text-gray-200">|</span>
-                                <button 
-                                    onClick={() => setSelectedWeeks([])}
-                                    className="text-[11px] font-black text-ios-rose hover:underline"
-                                >
-                                    해제
-                                </button>
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                            {weeks.map(w => (
-                                <button
-                                    key={w.id}
-                                    onClick={() => toggleWeek(w.id)}
-                                    className={`relative p-4 rounded-2xl border-2 transition-all group ${
-                                        selectedWeeks.includes(w.id)
-                                            ? 'bg-ios-indigo/5 border-ios-indigo'
-                                            : 'bg-white border-gray-100 hover:border-gray-200'
-                                    }`}
-                                >
-                                    <p className={`text-[13px] font-black ${selectedWeeks.includes(w.id) ? 'text-ios-indigo' : 'text-[#1C1C1E]'}`}>{w.id}주차</p>
-                                    <p className="text-[10px] text-ios-gray font-bold mt-1">
-                                        {format(w.start, 'MM/dd(eee)', { locale: ko })} - {format(w.end, 'MM/dd(eee)', { locale: ko })}
-                                    </p>
-                                    {selectedWeeks.includes(w.id) && (
-                                        <div className="absolute top-2 right-2 flex items-center justify-center w-5 h-5 rounded-full bg-ios-indigo text-white shadow-sm scale-110">
-                                            <Check className="w-3 h-3" strokeWidth={4} />
-                                        </div>
-                                    )}
-                                </button>
-                            ))}
                         </div>
                     </div>
                 </div>
