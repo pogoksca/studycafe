@@ -403,6 +403,7 @@ const CustomLogin = ({ onLoginSuccess }) => {
                                     />
                                 </div>
                                 <div className="relative group">
+                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-gray group-focus-within:text-ios-indigo transition-colors" />
                                     <input 
                                         required
                                         type={role === 'teacher' ? "password" : "text"}
