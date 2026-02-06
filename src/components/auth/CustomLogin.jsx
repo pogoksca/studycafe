@@ -207,8 +207,8 @@ const CustomLogin = ({ onLoginSuccess }) => {
             return;
         }
 
-        // Debug Alert for Mobile
-        // alert(`Debug: InputID=[${inputId}] InputName=[${inputName}] Found=[${applicants?.length}]`);
+        // Debug Alert for Mobile - Check strictly what is being sent
+        alert(`Debug: InputID=[${inputId}] InputName=[${inputName}] Found=[${applicants?.length}]`);
 
         if (!applicants || applicants.length === 0) {
             setError('등록되지 않은 학번입니다.');
