@@ -262,23 +262,14 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
 
             for (let i = 0; i < data.length; i++) {
                 const s = data[i];
-                const prevS = i > 0 ? data[i-1] : null;
-
-                if (!prevS) {
-                    // First session window: 07:00 ~ its end_time
-                    if (nowTime >= '07:00:00' && nowTime <= s.end_time) {
-                        candidate = s;
-                        break;
-                    }
-                } else {
-                    // Subsequent sessions: previous end_time ~ its end_time
-                    if (nowTime > prevS.end_time && nowTime <= s.end_time) {
-                        candidate = s;
-                        break;
-                    }
+                if (nowTime <= s.end_time) {
+                    candidate = s;
+                    break;
                 }
             }
-            setActiveSession(candidate ? candidate.id : data[0]?.id);
+            // Fallback: If current time is past all sessions, pick the LAST session of the day
+            // instead of the first, as teachers often check attendance after hours.
+            setActiveSession(candidate ? candidate.id : data[data.length - 1]?.id);
         }
     };
 
