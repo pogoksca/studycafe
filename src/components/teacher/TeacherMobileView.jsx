@@ -281,7 +281,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             .order('seat_number', { ascending: true });
 
         if (seatsError) {
-            console.error('Error fetching seats:', seatsError);
+            console.error('[Debug] Error fetching seats:', seatsError);
             setLoading(false);
             return;
         }
@@ -300,7 +300,10 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             const formatted = allSeats.map(s => {
                 const activeBooking = (allDailyBookings || []).find(b => b.seat_id === s.id && b.session_id === activeSession);
                 const isBookedToday = (allDailyBookings || []).some(b => b.seat_id === s.id);
-                const attendance = activeBooking?.attendance?.[0];
+                
+                // Handle both array and object responses for attendance join
+                const attData = activeBooking?.attendance;
+                const attendance = Array.isArray(attData) ? attData[0] : attData;
                 
                 const occupant = activeBooking?.profiles_student || activeBooking?.profiles;
 
@@ -381,7 +384,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                 const startTime = currentSessionData.start_time.length === 5 
                     ? currentSessionData.start_time + ':00' 
                     : currentSessionData.start_time;
-                upsertData.timestamp_in = `${todayDate}T${startTime}+09:00`;
+                upsertData.timestamp_in = `${selectedDate}T${startTime}+09:00`;
                 upsertData.status = 'present';
             } else {
                 upsertData.timestamp_in = getKSTISOString();
@@ -720,41 +723,56 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                                 </div>
                                                 <div className="grid-card-footer">
                                                     {item.full_name ? (
-                                                        item.status === 'absent' ? (
-                                                            <>
-                                                                <div className="grid-status-btn status-absent-btn">미출석</div>
-                                                                <button 
-                                                                    className="grid-action-btn"
-                                                                    onClick={() => toggleAttendance(item)}
-                                                                    style={{ backgroundColor: headerColor }}
-                                                                >
-                                                                    출석처리
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                    <div 
-                                                                        className={`grid-status-btn ${
-                                                                            item.status === 'present' ? 'status-present-active' :
-                                                                            item.status === 'late' ? 'status-late-active' :
-                                                                            'status-early-active'
-                                                                        }`}
-                                                                        style={{ backgroundColor: item.status === 'present' ? headerColor : undefined }}
-                                                                    >
-                                                                        {(() => {
-                                                                            const session = sessions.find(s => s.id === activeSession);
-                                                                            const now = format(new Date(), 'HH:mm:ss');
-                                                                            return item.status === 'present' ? (session && now > session.end_time ? '학습종료' : '학습중') : item.status === 'late' ? '지각' : '조퇴';
-                                                                        })()}
-                                                                    </div>
-                                                                <button 
-                                                                    className="grid-action-btn subtle" 
-                                                                    onClick={() => resetAttendance(item)}
-                                                                >
-                                                                    결석처리
-                                                                </button>
-                                                            </>
-                                                        )
+                                                        (() => {
+                                                            const session = sessions.find(s => s.id === activeSession);
+                                                            const nowTime = format(new Date(), 'HH:mm:ss');
+                                                            const isPastDate = selectedDate < todayDate;
+                                                            const isToday = selectedDate === todayDate;
+                                                            const sessionEnded = session && nowTime > session.end_time;
+                                                            const isExpired = isPastDate || (isToday && sessionEnded);
+
+                                                            if (item.status === 'absent') {
+                                                                return (
+                                                                    <>
+                                                                        <div className="grid-status-btn status-absent-btn">
+                                                                            {isExpired ? '결석' : '미출석'}
+                                                                        </div>
+                                                                        <button 
+                                                                            className="grid-action-btn"
+                                                                            onClick={() => toggleAttendance(item)}
+                                                                            style={{ backgroundColor: headerColor }}
+                                                                        >
+                                                                            출석처리
+                                                                        </button>
+                                                                    </>
+                                                                );
+                                                            } else {
+                                                                const statusLabel = 
+                                                                    item.status === 'present' ? (isExpired ? '학습완료' : '학습중') :
+                                                                    item.status === 'late' ? '지각' : '조퇴';
+
+                                                                return (
+                                                                    <>
+                                                                        <div 
+                                                                            className={`grid-status-btn ${
+                                                                                item.status === 'present' ? 'status-present-active' :
+                                                                                item.status === 'late' ? 'status-late-active' :
+                                                                                'status-early-active'
+                                                                            }`}
+                                                                            style={{ backgroundColor: item.status === 'present' ? headerColor : undefined }}
+                                                                        >
+                                                                            {statusLabel}
+                                                                        </div>
+                                                                        <button 
+                                                                            className="grid-action-btn subtle" 
+                                                                            onClick={() => resetAttendance(item)}
+                                                                        >
+                                                                            결석처리
+                                                                        </button>
+                                                                    </>
+                                                                );
+                                                            }
+                                                        })()
                                                     ) : (
                                                         <div className="grid-status-btn status-absent-btn opacity-20">-</div>
                                                     )}
