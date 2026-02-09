@@ -373,16 +373,24 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const nextStatus = 'present';
 
         const upsertData = {
-            id: item.attendance_id,
             booking_id: item.booking_id,
             status: nextStatus,
             updated_at: new Date().toISOString()
         };
 
+        // Only include ID if it is a valid update (to prevent passing undefined)
+        if (item.attendance_id) {
+            upsertData.id = item.attendance_id;
+        }
+
         if (!item.timestamp_in) {
             const currentSessionData = sessions.find(s => s.id === activeSession);
             if (currentSessionData) {
-                upsertData.timestamp_in = `${todayDate}T${currentSessionData.start_time}+09:00`;
+                // Formatting: ensure HH:mm:ss
+                const startTime = currentSessionData.start_time.length === 5 
+                    ? currentSessionData.start_time + ':00' 
+                    : currentSessionData.start_time;
+                upsertData.timestamp_in = `${todayDate}T${startTime}+09:00`;
                 upsertData.status = 'present';
             } else {
                 upsertData.timestamp_in = getKSTISOString();
@@ -395,14 +403,19 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             .select()
             .single();
 
-        if (!error && updatedRecord) {
+        if (error) {
+            console.error('[Attendance Update Error]', error.message, error.details);
+            // Re-fetch to sync if local state might be stale
+            fetchAttendanceList();
+            return;
+        }
+
+        if (updatedRecord) {
             setAttendanceData(prev => prev.map(d => 
                 d.booking_id === item.booking_id 
                 ? { ...d, status: updatedRecord.status, attendance_id: updatedRecord.id, timestamp_in: updatedRecord.timestamp_in }
                 : d
             ));
-        } else {
-            fetchAttendanceList();
         }
     };
 
@@ -606,7 +619,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         const isPastDate = selectedDate < todayStr;
         const isToday = selectedDate === todayStr;
         const isFutureDate = selectedDate > todayStr;
-        const isExpired = currentUser?.role !== 'admin' && (isPastDate || (isToday && currentTime > lastSessionEnd));
+        const isExpired = currentUser?.role !== 'admin' && isPastDate;
         const limitedFuture = currentUser?.role !== 'admin' && isFutureDate;
 
         return (
