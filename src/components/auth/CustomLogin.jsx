@@ -118,7 +118,12 @@ const CustomLogin = ({ onLoginSuccess }) => {
     const parentSigPad = React.useRef(null);
 
     const [schoolName, setSchoolName] = useState(() => {
-        return sessionStorage.getItem('schoolName') || 'GOE';
+        try {
+            const saved = sessionStorage.getItem('schoolInfo');
+            return saved ? JSON.parse(saved).name_en : null;
+        } catch (e) {
+            return null;
+        }
     });
 
     useEffect(() => {
@@ -131,6 +136,8 @@ const CustomLogin = ({ onLoginSuccess }) => {
             if (data?.value) {
                 setSchoolName(data.value.name_en || 'GOE');
                 sessionStorage.setItem('schoolInfo', JSON.stringify(data.value));
+            } else if (!schoolName) {
+                setSchoolName('GOE');
             }
         };
         fetchSchoolInfo();
@@ -353,7 +360,9 @@ const CustomLogin = ({ onLoginSuccess }) => {
                         <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-6 border border-gray-100 shadow-sm overflow-hidden">
                             <Layout className="w-7 h-7 text-ios-indigo" />
                         </div>
-                        <h1 className="text-3xl font-black tracking-tighter leading-none">{schoolName}</h1>
+                        <h1 className={`text-3xl font-black tracking-tighter leading-none transition-opacity duration-300 ${schoolName ? 'opacity-100' : 'opacity-0'}`}>
+                            {schoolName || 'GOE'}
+                        </h1>
                         <p className="text-[10px] font-black tracking-[0.3em] uppercase text-ios-indigo">Study Cafe System</p>
                     </div>
                     <div className="absolute -right-10 -top-10 w-40 h-40 bg-ios-indigo/5 rounded-full blur-3xl" />

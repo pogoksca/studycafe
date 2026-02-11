@@ -311,8 +311,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
             seat_id: selectedSeat.id,
             session_id: session.id,
             date: date,
-            created_at: getKSTISOString(),
-            status: 'confirmed'
+            created_at: getKSTISOString()
         }));
         const { error: bookingError } = await supabase.from('bookings').insert(bookingsToInsert);
         if (bookingError) {
@@ -417,8 +416,11 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
       <div className="absolute top-0 right-0 w-24 h-24 bg-ios-indigo/5 blur-2xl -z-10" />
       
       {/* Selected Seat Info - Relocated to Top */}
-      <div className="bg-gray-50/50 rounded-[6px] mt-[10px] pt-4 px-4 pb-4 flex items-center gap-4 border border-gray-100">
-        <div className="w-12 h-12 rounded-[6px] bg-white text-[#000000] flex items-center justify-center font-black text-sm border border-gray-200 shadow-sm">
+      <div 
+        onClick={onOpenSeatModal}
+        className="bg-gray-50/50 rounded-[6px] mt-[10px] pt-4 px-4 pb-4 flex items-center gap-4 border border-gray-100 cursor-pointer hover:bg-gray-100/50 transition-colors group/seat"
+      >
+        <div className="w-12 h-12 rounded-[6px] bg-white text-[#000000] flex items-center justify-center font-black text-sm border border-gray-200 shadow-sm group-hover/seat:border-ios-indigo/30 transition-colors">
           {selectedSeat ? (selectedSeat.display_number || selectedSeat.seat_number) : '?'}
         </div>
         <div>
@@ -426,7 +428,7 @@ const BookingWizard = ({ selectedSeat, onComplete, targetUser, loggedInUser, ini
             {selectedSeat ? '현재 선택된 좌석' : '원하는 좌석을 더블 클릭하여'}
           </p>
           <p className="text-base font-black text-[#1C1C1E]">
-            {selectedSeat ? `Zone ${zones.find(z => z.id === selectedSeat.zone_id)?.name || ''}` : '좌석을 선택해 주세요'}
+            {selectedSeat ? `Zone ${zones.find(z => z.id === selectedSeat.zone_id)?.name || ''}` : '좌석을 직접 선택해 주세요'}
           </p>
         </div>
       </div>

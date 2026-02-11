@@ -60,8 +60,11 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
             const d = b.date;
             if (!dataMap[d]) dataMap[d] = { bookings: [], attendance: [] };
             dataMap[d].bookings.push(b);
-            if (b.attendance && b.attendance.length > 0) {
-                dataMap[d].attendance.push(...b.attendance);
+            
+            // Handle array or object
+            const atts = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+            if (atts.length > 0) {
+                dataMap[d].attendance.push(...atts);
             }
         });
         setWeeklyData(dataMap);
@@ -165,9 +168,20 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
     // 2. Past
     if (dateStr < todayStr) {
         if (!attendance.length) return { label: '결석', color: 'text-ios-rose bg-ios-rose/10' };
-        const isLate = attendance.some(a => a.status === 'late');
-        if (isLate) return { label: '지각', color: 'text-ios-amber bg-ios-amber/10' };
-        return { label: '이수', color: 'text-ios-emerald bg-ios-emerald/10' };
+        
+        const totalSessions = bookings.length;
+        const attendedCount = attendance.filter(a => a.status === 'present' || a.status === 'early_leave').length;
+
+        if (attendedCount === totalSessions) {
+            return { label: '이수', color: 'text-ios-emerald bg-ios-emerald/10' };
+        } else if (attendedCount > 0) {
+            return { label: '일부이수', color: 'text-ios-blue bg-ios-blue/10' };
+        }
+        
+        const hasLate = attendance.some(a => a.status === 'late');
+        if (hasLate) return { label: '지각', color: 'text-ios-amber bg-ios-amber/10' };
+        
+        return { label: '결석', color: 'text-ios-rose bg-ios-rose/10' };
     }
 
     // 3. Today
@@ -246,79 +260,85 @@ const StudentMobileView = ({ onLogout, currentUser }) => {
                 </div>
 
                 {/* Weekly Status */}
-                <div className="bg-gray-200/20 rounded-apple-md p-4 border border-white/40 mt-auto relative backdrop-blur-xl">
-                    {/* Navigation Arrows */}
+                <div className="mt-auto flex items-center justify-center gap-1">
+                    {/* Previous Week Button */}
                     <button 
                         onClick={handlePrevWeek}
-                        className="absolute left-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap"
+                        className="w-6 h-6 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap shrink-0"
                     >
-                        <ChevronLeft className="w-5 h-5" />
+                        <ChevronLeft className="w-4 h-4" />
                     </button>
+
+                    <div className="flex-1 bg-gray-200/20 rounded-apple-md px-2 py-3 border border-white/40 relative backdrop-blur-xl">
+                        <div className="flex justify-between items-center px-0">
+                            {eachDayOfInterval({ start: startOfWeek(currentDate, { weekStartsOn: 1 }), end: endOfWeek(currentDate, { weekStartsOn: 1 }) }).map((day, i) => {
+                                const dateStr = format(day, 'yyyy-MM-dd');
+                                const dayData = weeklyData[dateStr];
+                                const status = getDayStatus(dateStr, dayData);
+                                const isCur = isSameDay(day, new Date()); // Check against real today
+                                
+                                let bgClass = isCur 
+                                    ? (status 
+                                        ? 'bg-ios-indigo text-white shadow-lg ring-4 ring-white z-10' 
+                                        : 'bg-white/50 border border-white/40 text-[#1C1C1E]') 
+                                    : 'bg-white/50 border border-white/40 text-gray-300';
+                                
+                                if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
+                                    bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
+                                } else if (status?.label === '일부이수') {
+                                    bgClass = 'bg-ios-blue text-white shadow-sm border-none';
+                                } else if (status?.label === '지각') {
+                                    bgClass = 'bg-ios-amber text-white shadow-sm border-none';
+                                } else if (status?.label === '결석' || status?.label === '미입실') {
+                                    bgClass = 'bg-ios-rose text-white shadow-sm border-none';
+                                } else if (status?.label === '예약') {
+                                    bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
+                                }
+
+                                const isWeekend = i === 5 || i === 6; // Sat, Sun (i is 0-indexed from Mon)
+                                const isHoliday = exceptions.some(ex => ex.date === dateStr);
+                                
+                                let labelColor = 'text-gray-300';
+                                if (isCur) labelColor = 'text-ios-indigo';
+                                else if (isHoliday || isWeekend) labelColor = 'text-ios-rose/40';
+                                else if (dayData && dayData.bookings.length > 0) labelColor = 'text-ios-indigo';
+
+                                return (
+                                    <div 
+                                        key={i} 
+                                        className={`flex flex-col items-center gap-1.5 ${dayData ? 'cursor-pointer' : ''}`}
+                                        onClick={() => dayData && setManageDate(day)}
+                                    >
+                                        <span className={`text-[8px] font-black ${labelColor}`}>
+                                            {['월','화','수','목','금','토','일'][i]}
+                                        </span>
+                                        <div className={`w-6 h-6 rounded-ios flex items-center justify-center text-[9px] font-black transition-all ios-tap ${bgClass}`}>
+                                            {format(day, 'd')}
+                                        </div>
+                                        <div className="h-3 flex items-center justify-center">
+                                            {status ? (
+                                                <span className={`text-[7px] font-bold px-1 py-0.5 rounded-full whitespace-nowrap ${status.color}`}>
+                                                    {status.label}
+                                                </span>
+                                            ) : isCur ? (
+                                                <span className="text-[7px] font-black text-ios-indigo">오늘</span>
+                                            ) : (
+                                                <div className="w-0.5 h-0.5 rounded-full bg-transparent" />
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Next Week Button */}
                     <button 
                         onClick={handleNextWeek}
-                        className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap"
+                        className="w-6 h-6 flex items-center justify-center text-ios-gray hover:text-[#1C1C1E] transition-colors ios-tap shrink-0"
                     >
-                        <ChevronRight className="w-5 h-5" />
+                        <ChevronRight className="w-4 h-4" />
                     </button>
-
-                    <div className="flex justify-between items-center px-6">
-                        {eachDayOfInterval({ start: startOfWeek(currentDate, { weekStartsOn: 1 }), end: endOfWeek(currentDate, { weekStartsOn: 1 }) }).map((day, i) => {
-                            const dateStr = format(day, 'yyyy-MM-dd');
-                            const dayData = weeklyData[dateStr];
-                            const status = getDayStatus(dateStr, dayData);
-                            const isCur = isSameDay(day, new Date()); // Check against real today
-                            
-                            let bgClass = isCur 
-                                ? (status 
-                                    ? 'bg-ios-indigo text-white shadow-lg ring-4 ring-white z-10' 
-                                    : 'bg-white/50 border border-white/40 text-[#1C1C1E]') 
-                                : 'bg-white/50 border border-white/40 text-gray-300';
-                            
-                            if (status?.label === '이수' || status?.label === '학습중' || status?.label === '출석') {
-                                bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
-                            } else if (status?.label === '지각') {
-                                bgClass = 'bg-ios-amber text-white shadow-sm border-none';
-                            } else if (status?.label === '결석' || status?.label === '미입실') {
-                                bgClass = 'bg-ios-rose text-white shadow-sm border-none';
-                            } else if (status?.label === '예약') {
-                                bgClass = 'bg-ios-indigo text-white shadow-sm border-none';
-                            }
-
-                            const isWeekend = i === 5 || i === 6; // Sat, Sun (i is 0-indexed from Mon)
-                            const isHoliday = exceptions.some(ex => ex.date === dateStr);
-                            
-                            let labelColor = 'text-gray-300';
-                            if (isCur) labelColor = 'text-ios-indigo';
-                            else if (isHoliday || isWeekend) labelColor = 'text-ios-rose/40';
-                            else if (dayData && dayData.bookings.length > 0) labelColor = 'text-ios-indigo';
-
-                            return (
-                                <div 
-                                    key={i} 
-                                    className={`flex flex-col items-center gap-4 ${dayData ? 'cursor-pointer' : ''}`}
-                                    onClick={() => dayData && setManageDate(day)}
-                                >
-                                    <span className={`text-[9px] font-black ${labelColor}`}>
-                                        {['월','화','수','목','금','토','일'][i]}
-                                    </span>
-                                    <div className={`w-8 h-8 rounded-ios flex items-center justify-center text-[10px] font-black transition-all ios-tap ${bgClass}`}>
-                                        {format(day, 'd')}
-                                    </div>
-                                    <div className="h-4 flex items-center justify-center">
-                                        {status ? (
-                                            <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${status.color}`}>
-                                                {status.label}
-                                            </span>
-                                        ) : isCur ? (
-                                            <span className="text-[8px] font-black text-ios-indigo">오늘</span>
-                                        ) : (
-                                            <div className="w-1 h-1 rounded-full bg-transparent" />
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
                 </div>
              </div>
 

@@ -26,6 +26,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
   
   const [stats, setStats] = useState({
     present: 0,
+    partial: 0,
     late: 0,
     absent: 0,
     earlyLeave: 0,
@@ -51,14 +52,19 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     if (dateStr < todayStr) {
         if (!attendance.length) return { label: '결석', color: 'text-ios-rose bg-ios-rose/10' };
         
-        // Check day status priorities for display
-        const hasEarlyLeave = attendance.some(a => a.status === 'early_leave');
-        if (hasEarlyLeave) return { label: '조퇴', color: 'text-ios-blue bg-ios-blue/10' };
+        const totalSessions = bookings.length;
+        const attendedCount = attendance.filter(a => a.status === 'present' || a.status === 'early_leave').length;
+
+        if (attendedCount === totalSessions) {
+            return { label: '이수', color: 'text-ios-emerald bg-ios-emerald/10' };
+        } else if (attendedCount > 0) {
+            return { label: '일부이수', color: 'text-ios-blue bg-ios-blue/10' };
+        }
 
         const isLate = attendance.some(a => a.status === 'late');
         if (isLate) return { label: '지각', color: 'text-ios-amber bg-ios-amber/10' };
 
-        return { label: '이수', color: 'text-ios-emerald bg-ios-emerald/10' };
+        return { label: '결석', color: 'text-ios-rose bg-ios-rose/10' };
     }
 
     const currentTime = format(now, 'HH:mm:ss');
@@ -100,13 +106,14 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     const hasAnyAttendance = attendance.length > 0;
     
     if (activeBooking) {
-      const att = attendance.find(a => a.booking_id === activeBooking.id);
-      if (att) return { label: '학습 중', color: 'bg-ios-emerald text-white', sub: `${activeBooking.sessions.name} 진행 중` };
+      const atts = Array.isArray(activeBooking.attendance) ? activeBooking.attendance : (activeBooking.attendance ? [activeBooking.attendance] : []);
+      const att = atts.find(a => a.booking_id === activeBooking.id);
+      if (att) return { label: '학습 중', color: 'bg-ios-emerald text-white', sub: `${activeBooking.sessions?.name || '세션'} 진행 중` };
       return { label: '미입실', color: 'bg-ios-rose text-white', sub: '현재 세션 입실이 확인되지 않았습니다.' };
     }
 
     if (hasAnyAttendance) {
-        const lastAtt = attendance.filter(Boolean).sort((a,b) => (b.timestamp_in || '').localeCompare(a.timestamp_in || ''))[0];
+        const lastAtt = [...attendance].filter(Boolean).sort((a,b) => (b.timestamp_in || '').localeCompare(a.timestamp_in || ''))[0];
         if (lastAtt && lastAtt.timestamp_out) return { label: '귀가 완료', color: 'bg-gray-800 text-white', sub: `${format(new Date(lastAtt.timestamp_out), 'HH:mm')} 퇴실 확인` };
         if (lastAtt) return { label: '휴식 중', color: 'bg-ios-amber text-white', sub: '다음 학습 세션을 기다리는 중입니다.' };
     }
@@ -128,12 +135,19 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
       const todayStr = format(new Date(), 'yyyy-MM-dd');
       
         // 1. Today's Hero Data
-      const { data: bookings } = await supabase
+      const { data: bookings, error: bError } = await supabase
         .from('bookings')
-        .select('*, sessions (*), attendance (*)')
+        .select(`
+          *,
+          sessions (id, name, start_time, end_time),
+          seats (id, seat_number, zone_name, zone_id, zones(name)),
+          attendance (id, booking_id, status, timestamp_in, timestamp_out)
+        `)
         .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
         .eq('date', todayStr)
         .order('session_id', { ascending: true });
+
+      if (bError) console.error("Error fetching today's bookings:", bError);
 
       // 2. Weekly Calendar Data
       const start = startOfWeek(currentCalendarDate, { weekStartsOn: 1 });
@@ -157,8 +171,9 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
               const d = b.date;
               if (!dataMap[d]) dataMap[d] = { bookings: [], attendance: [] };
               dataMap[d].bookings.push(b);
-              if (b.attendance && b.attendance.length > 0) {
-                  dataMap[d].attendance.push(...b.attendance);
+              const attList = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+              if (attList.length > 0) {
+                  dataMap[d].attendance.push(...attList);
               }
           });
           setWeeklyData(dataMap);
@@ -174,19 +189,23 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
       // 3. Timing/Sessions
       const { data: allSessions } = await supabase.from('sessions').select('*').order('start_time');
-      if (allSessions) {
-        const now = new Date();
-        const currentTime = format(now, 'HH:mm:ss');
-        const current = allSessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
-        const next = allSessions.find(s => s.start_time > currentTime);
-        
-        setTodayData({
-          bookings: bookings || [],
-          attendance: bookings?.flatMap(b => b.attendance).filter(Boolean) || [],
-          currentSession: current,
-          nextSession: next
-        });
-      }
+      
+      const now = new Date();
+      const currentTime = format(now, 'HH:mm:ss');
+      const current = allSessions?.find(s => currentTime >= s.start_time && currentTime <= s.end_time) || null;
+      const next = allSessions?.find(s => s.start_time > currentTime) || null;
+      
+      const attData = (bookings || []).flatMap(b => {
+          if (!b.attendance) return [];
+          return Array.isArray(b.attendance) ? b.attendance : [b.attendance];
+      }).filter(Boolean);
+
+      setTodayData({
+        bookings: bookings || [],
+        attendance: attData,
+        currentSession: current,
+        nextSession: next
+      });
 
       // 4. stats Tab
       if (activeTab === 'stats' || loading) {
@@ -228,7 +247,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         const [bookingsRes, plansRes] = await Promise.all([
           supabase
             .from('bookings')
-            .select('id, date, session_id, attendance (status, timestamp_in), sessions (name)')
+            .select('id, date, session_id, attendance (status, timestamp_in, timestamp_out), sessions (name, start_time, end_time)')
             .or(`student_id.eq.${currentUser.id},user_id.eq.${currentUser.id}`)
             .gte('date', qStart)
             .lte('date', qEnd)
@@ -245,7 +264,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
         const qStudyPlans = plansRes.data;
 
         if (qBookings) {
-          const counts = { present: 0, late: 0, absent: 0, earlyLeave: 0 };
+          const counts = { present: 0, partial: 0, late: 0, absent: 0, earlyLeave: 0 };
           const history = [];
           
           // Group by Date for Day-based stats
@@ -255,19 +274,24 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
             if (!bookingsByDate[b.date]) bookingsByDate[b.date] = [];
             bookingsByDate[b.date].push(b);
 
-             // Prepare History
-             const att = b.attendance?.[0];
+             // Prepare History - Handle both array and object
+             const attendanceData = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+             const att = attendanceData[0];
+
              // Past booking without attendance check
              const todayStr = format(new Date(), 'yyyy-MM-dd');
              const isPastBooking = b.date < todayStr;
              const status = att?.status || (isPastBooking ? 'absent' : null);
              
-             if (status) { // Only add if we have a status (stats or implicit absence)
+             if (status) {
                  const plan = qStudyPlans?.find(p => p.date === b.date && p.session_id === b.session_id);
                  history.push({
                       date: b.date,
                       status: status, // present, late, absent, early_leave
-                      time: att?.timestamp_in ? format(new Date(att.timestamp_in), 'HH:mm') : '-',
+                      timestamp_in: att?.timestamp_in,
+                      timestamp_out: att?.timestamp_out,
+                      session_start: b.sessions?.start_time,
+                      session_end: b.sessions?.end_time,
                       content: plan?.content || null,
                       session_name: b.sessions?.name
                  });
@@ -276,36 +300,57 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
 
           // Calculate Stats
           Object.keys(bookingsByDate).forEach(date => {
-              // Don't count future dates
               const todayStr = format(new Date(), 'yyyy-MM-dd');
               if (date > todayStr) return;
               
               const dayBookings = bookingsByDate[date];
-              const attendedBookings = dayBookings.filter(b => b.attendance && b.attendance.length > 0);
+              const attendedBookings = dayBookings.filter(b => {
+                  const att = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                  return att.length > 0 && att[0].status !== 'absent';
+              });
               
-              // 1. Lateness (Session based)
+              // 1. Lateness & Early Leave counts (Session based)
               dayBookings.forEach(b => {
-                 if (b.attendance?.[0]?.status === 'late') {
-                     counts.late++;
-                 }
+                 const atts = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                 const firstAtt = atts[0];
+                 if (firstAtt?.status === 'late') counts.late++;
+                 if (firstAtt?.status === 'early_leave') counts.earlyLeave++;
               });
 
-              // 2. Day Status
-              if (attendedBookings.length === 0) {
-                  // Absence: No attendance at all (check if date is in past)
-                  if (date < todayStr) {
-                      counts.absent++;
-                  }
-              } else {
-                  // Has some attendance
-                  const hasEarlyLeave = attendedBookings.some(b => b.attendance[0].status === 'early_leave');
+              // 2. Day Status (Completion vs Absence vs Partial)
+              if (date < todayStr) {
+                  const totalSessions = dayBookings.length;
+                  const attendedCount = attendedBookings.filter(b => {
+                      const att = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []); 
+                      return att.some(a => a.status === 'present' || a.status === 'early_leave');
+                  }).length;
                   
-                  if (hasEarlyLeave) {
-                      counts.earlyLeave++;
-                  } else if (attendedBookings.length === dayBookings.length) {
-                      // All attended, no early leave
-                      // This implies "Completion" (이수)
-                      counts.present++; 
+                  if (attendedCount === totalSessions && totalSessions > 0) {
+                      counts.present++;
+                  } else if (attendedCount > 0) {
+                      counts.partial++;
+                  } else {
+                      // Check for Late if not partial/present
+                       const hasLate = dayBookings.some(b => {
+                          const att = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                          return att.some(a => a.status === 'late');
+                       });
+                       
+                       if (hasLate) {
+                           // Already counted in 'late' per session above, but for DAY status:
+                           // If day is not present/partial, and has late, do we count day as late?
+                           // The requirements say: Present > Partial > Late > Absent.
+                           // The 'stats' object has 'late' count which seems to be Session-based in previous code, 
+                           // but usually stats are Day-based or Session-based depending on UI.
+                           // Looking at UI "지각 ...회", it seems Session-based.
+                           // But "이수 ...일", "결석 ...일" are Day-based.
+                           // "일부이수" should be Day-based.
+                           
+                           // If status is Late, we don't increment present/absent/partial days.
+                           // We just ensure it's not counted as absent.
+                       } else {
+                           counts.absent++;
+                       }
                   }
               }
           });
@@ -331,75 +376,130 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     return () => clearInterval(interval);
   }, [currentUser, currentCalendarDate, activeTab, loading]);
 
-  const renderHome = () => {
-    const status = getStatusDisplay();
-    const expected = getExpectedDeparture();
-    const lastOut = todayData.attendance.find(a => a.timestamp_out)?.timestamp_out;
+    const renderHome = () => {
+        const now = new Date();
+        const currentTime = format(now, 'HH:mm:ss');
+        
+        // 1. Determine Display Seat (Active or Next Session)
+        const activeBooking = todayData.bookings.find(b => b.session_id === todayData.currentSession?.id);
+        const nextBooking = todayData.bookings.find(b => b.session_id === todayData.nextSession?.id);
+        const relevantBooking = activeBooking || nextBooking || todayData.bookings[0];
+        
+        let displaySeat = '-';
+        if (relevantBooking) {
+            const zone = relevantBooking.seats?.zone_name || '';
+            const seatNum = relevantBooking.seat_number || relevantBooking.seats?.seat_number || '-';
+            displaySeat = zone ? `${zone}-${seatNum}` : seatNum;
+        }
+        
+        // 2. Dashboard Status & Timing
+        const status = getStatusDisplay();
+        const expectedTime = getExpectedDeparture();
+        
+        // 3. Smart Checkout Logic (Actual -> Auto-fallback if all sessions done -> '--:--')
+        const actualLastOut = (todayData.attendance || [])
+            .filter(a => a && a.timestamp_out)
+            .sort((a, b) => (b.timestamp_out || '').localeCompare(a.timestamp_out || ''))[0]?.timestamp_out;
 
-    return (
-      <div className="h-full p-4 flex flex-col gap-2 animate-fade-in relative scrollbar-hide">
-        {/* Status Hero Card (50%) */}
-        <div className="flex-[2] glass-card pt-8 pb-5 px-5 flex flex-col items-center text-center relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-ios-indigo/10 blur-3xl -z-10" />
-          
-          <div className={`px-6 py-2 rounded-full text-[13px] font-black uppercase tracking-widest ${status.color} shadow-lg shadow-current/10`}>
-            {status.label}
-          </div>
-          
-          <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-            <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{currentUser?.full_name}</h2>
-          </div>
+        let displayLastOut = '--:--';
+        let isAutoCheckout = false;
 
-          <div className="w-full grid grid-cols-3 gap-2 pt-4 border-t border-gray-50">
-            <div className="space-y-1">
-                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">좌석 번호</p>
-                <p className="text-[11px] font-black text-[#1C1C1E]">
-                    {todayData.bookings[0]?.seat_number || '-'}
-                </p>
-            </div>
-            <div className="space-y-1 border-l border-gray-50">
-                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">귀가 예정</p>
-                <p className="text-[11px] font-black text-[#1C1C1E] underline decoration-ios-indigo/30 underline-offset-4">{expected}</p>
-            </div>
-            <div className="space-y-1 border-l border-gray-50">
-                <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">실제 퇴실</p>
-                <p className="text-[11px] font-black text-ios-indigo">
-                    {lastOut ? format(new Date(lastOut), 'HH:mm') : '--:--'}
-                </p>
-            </div>
-          </div>
-        </div>
+        if (actualLastOut) {
+            try {
+                displayLastOut = format(new Date(actualLastOut), 'HH:mm');
+            } catch (e) {
+                displayLastOut = '--:--';
+            }
+        } else if ((todayData.attendance?.length || 0) > 0 && expectedTime && expectedTime !== '-') {
+            // Find the literal last session object to check its literal end_time
+            const lastSessionObj = [...(todayData.bookings || [])]
+                .sort((a, b) => (a.sessions?.end_time || '').localeCompare(b.sessions?.end_time || ''))
+                .pop()?.sessions;
+            
+            if (lastSessionObj?.end_time && currentTime > lastSessionObj.end_time) {
+                displayLastOut = expectedTime;
+                isAutoCheckout = true;
+            }
+        }
 
-        {/* All Sessions Schedule (25%) */}
-        <div className="flex-1 glass-card p-5 flex flex-col justify-center space-y-2">
-            <div className="flex items-center justify-between mb-1">
-                <h3 className="text-[11px] font-black text-ios-gray uppercase tracking-widest">오늘의 학습 일정</h3>
-                <div className="flex items-center gap-1">
-                    <div className="w-1 h-1 rounded-full bg-ios-emerald shadow-[0_0_8px_rgba(52,199,89,0.5)]" />
-                    <span className="text-[11px] font-black text-ios-emerald uppercase">Live</span>
+        return (
+          <div className="h-full p-4 flex flex-col gap-2 animate-fade-in relative scrollbar-hide">
+            {/* Status Hero Card (50%) */}
+            <div className="flex-[2] glass-card pt-8 pb-5 px-5 flex flex-col items-center text-center relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-ios-indigo/10 blur-3xl -z-10" />
+              
+              <div className={`px-6 py-2 rounded-full text-[13px] font-black uppercase tracking-widest ${status.color} shadow-lg shadow-current/10`}>
+                {status.label}
+              </div>
+              
+              <div className="flex-1 flex flex-col items-center justify-center space-y-3">
+                <h2 className="text-2xl font-black text-[#1C1C1E] tracking-tight">{currentUser?.full_name || currentUser?.name || '학생'}</h2>
+              </div>
+
+              <div className="w-full grid grid-cols-3 gap-2 pt-4 border-t border-gray-50">
+                <div className="space-y-1">
+                    <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">좌석 번호</p>
+                    <p className="text-[11px] font-black text-[#1C1C1E]">
+                        {displaySeat}
+                    </p>
                 </div>
+                <div className="space-y-1 border-l border-gray-50">
+                    <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">귀가 예정</p>
+                    <p className="text-[11px] font-black text-[#1C1C1E] underline decoration-ios-indigo/30 underline-offset-4">{expectedTime || '-'}</p>
+                </div>
+                <div className="space-y-1 border-l border-gray-50">
+                    <p className="text-[11px] font-black text-ios-gray uppercase tracking-widest">실제 퇴실</p>
+                    <p className="text-[11px] font-black text-ios-indigo">
+                        {displayLastOut}
+                        {isAutoCheckout && (
+                            <span className="text-[8px] ml-0.5 opacity-60 font-bold decoration-dotted underline underline-offset-2">(자동)</span>
+                        )}
+                    </p>
+                </div>
+              </div>
             </div>
-            <div className="space-y-2 overflow-y-auto max-h-[120px] pr-1 scrollbar-hide">
-                {todayData.bookings.length > 0 ? todayData.bookings.map((booking, idx) => {
-                    const att = booking.attendance?.[0];
-                    const status = att ? (att.status === 'present' ? { label: '출석', color: 'text-ios-emerald bg-ios-emerald/10' } : att.status === 'late' ? { label: '지각', color: 'text-ios-amber bg-ios-amber/10' } : att.status === 'early_leave' ? { label: '조퇴', color: 'text-ios-blue bg-ios-blue/10' } : { label: '결석', color: 'text-ios-rose bg-ios-rose/10' }) : { label: '대기', color: 'text-gray-400 bg-gray-50' };
-                    
-                    return (
-                        <div key={booking.id} className={`flex items-center justify-between py-2 ${idx !== todayData.bookings.length - 1 ? 'border-b border-gray-50' : ''}`}>
-                            <div className="flex items-center gap-3">
-                                <div className={`w-1.5 h-1.5 rounded-full ${att?.status === 'present' ? 'bg-ios-emerald' : att?.status === 'late' ? 'bg-ios-amber' : att?.status === 'early_leave' ? 'bg-ios-blue' : 'bg-gray-200'}`} />
-                                <div>
-                                    <p className="text-[11px] font-black text-[#1C1C1E] leading-none mb-1">{booking.sessions?.name}</p>
-                                    <p className="text-[11px] font-bold text-ios-gray leading-none">
-                                        {booking.sessions?.start_time.substring(0,5)} - {booking.sessions?.end_time.substring(0,5)}
-                                    </p>
+
+            {/* All Sessions Schedule (25%) */}
+            <div className="flex-1 glass-card p-5 flex flex-col justify-center space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-[11px] font-black text-ios-gray uppercase tracking-widest">오늘의 학습 일정</h3>
+                    <div className="flex items-center gap-1">
+                        <div className="w-1 h-1 rounded-full bg-ios-emerald shadow-[0_0_8px_rgba(52,199,89,0.5)]" />
+                        <span className="text-[11px] font-black text-ios-emerald uppercase">Live</span>
+                    </div>
+                </div>
+                <div className="space-y-2 overflow-y-auto max-h-[120px] pr-1 scrollbar-hide">
+                    {todayData.bookings.length > 0 ? todayData.bookings.map((booking, idx) => {
+                        const atts = Array.isArray(booking.attendance) ? booking.attendance : (booking.attendance ? [booking.attendance] : []);
+                        const att = atts[0];
+                        
+                        const isPastSession = booking.sessions?.end_time && currentTime > booking.sessions?.end_time;
+                        
+                        const status = att 
+                            ? (att.status === 'present' ? { label: '출석', color: 'text-ios-emerald bg-ios-emerald/10', dot: 'bg-ios-emerald' } 
+                               : att.status === 'late' ? { label: '지각', color: 'text-ios-amber bg-ios-amber/10', dot: 'bg-ios-amber' } 
+                               : att.status === 'early_leave' ? { label: '조퇴', color: 'text-ios-blue bg-ios-blue/10', dot: 'bg-ios-blue' } 
+                               : { label: '결석', color: 'text-ios-rose bg-ios-rose/10', dot: 'bg-ios-rose' }) 
+                            : (isPastSession 
+                                ? { label: '결석', color: 'text-ios-rose bg-ios-rose/10', dot: 'bg-ios-rose' }
+                                : { label: '대기', color: 'text-gray-400 bg-gray-50', dot: 'bg-gray-200' });
+                        
+                        return (
+                            <div key={booking.id} className={`flex items-center justify-between py-2 ${idx !== todayData.bookings.length - 1 ? 'border-b border-gray-50' : ''}`}>
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
+                                    <div>
+                                        <p className="text-[11px] font-black text-[#1C1C1E] leading-none mb-1">{booking.sessions?.name || '세션명 없음'}</p>
+                                        <p className="text-[11px] font-bold text-ios-gray leading-none">
+                                            {(booking.sessions?.start_time || '--:--').substring(0,5)} - {(booking.sessions?.end_time || '--:--').substring(0,5)}
+                                        </p>
+                                    </div>
                                 </div>
+                                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${status.color}`}>
+                                    {status.label}
+                                </span>
                             </div>
-                            <span className={`text-[11px] font-black px-2 py-0.5 rounded-full ${status.color}`}>
-                                {status.label}
-                            </span>
-                        </div>
-                    );
+                        );
                 }) : (
                     <div className="flex flex-col items-center justify-center py-4 bg-gray-50 rounded-2xl">
                         <p className="text-[11px] font-black text-ios-gray">오늘 예정된 세션이 없습니다.</p>
@@ -441,7 +541,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                         bgClass = 'bg-ios-emerald text-white shadow-sm border-none';
                     } else if (status?.label === '지각') {
                         bgClass = 'bg-ios-amber text-white shadow-sm border-none';
-                    } else if (status?.label === '조퇴') {
+                    } else if (status?.label === '조퇴' || status?.label === '일부이수') {
                         bgClass = 'bg-ios-blue text-white shadow-sm border-none';
                     } else if (status?.label === '결석' || status?.label === '미입실') {
                         bgClass = 'bg-ios-rose text-white shadow-sm border-none';
@@ -493,7 +593,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
     return (
       <div className="p-5 space-y-6 animate-fade-in scrollbar-hide">
         <div className="glass-card p-8 relative overflow-hidden">
-            <div className="flex items-center gap-2 mb-2 text-ios-indigo"><BarChart3 className="w-4 h-4" /><h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3></div>
+            <div className="flex items-center gap-2 mb-2 text-ios-indigo">
+                <BarChart3 className="w-4 h-4" />
+                <h3 className="text-xs font-black uppercase tracking-widest">이번 분기 학습 요약</h3>
+            </div>
             <p className="text-[11px] font-bold text-ios-gray mb-6 pl-6">
                 {quarterInfo 
                     ? `${quarterInfo.quarter}분기: ${format(new Date(quarterInfo.start_date), 'yyyy-MM-dd(EEE)', { locale: ko })} ~ ${format(new Date(quarterInfo.end_date), 'yyyy-MM-dd(EEE)', { locale: ko })}`
@@ -508,11 +611,18 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                         <span className="text-xs font-bold text-ios-emerald/70">일</span>
                     </div>
                 </div>
-                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-apple">
-                    <span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span>
+                <div className="flex flex-col items-center p-4 bg-ios-indigo/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-indigo uppercase opacity-60 mb-1">조퇴</span>
                     <div className="flex items-baseline gap-1">
-                        <span className="text-2xl font-black text-ios-rose">{stats.absent}</span>
-                        <span className="text-xs font-bold text-ios-rose/70">일</span>
+                        <span className="text-2xl font-black text-ios-indigo">{stats.earlyLeave}</span>
+                        <span className="text-xs font-bold text-ios-indigo/70">일</span>
+                    </div>
+                </div>
+                <div className="flex flex-col items-center p-4 bg-ios-blue/5 rounded-apple">
+                    <span className="text-[10px] font-black text-ios-blue uppercase opacity-60 mb-1">일부이수</span>
+                    <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-black text-ios-blue">{stats.partial}</span>
+                        <span className="text-xs font-bold text-ios-blue/70">일</span>
                     </div>
                 </div>
                 <div className="flex flex-col items-center p-4 bg-ios-amber/5 rounded-apple">
@@ -522,11 +632,11 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                         <span className="text-xs font-bold text-ios-amber/70">회</span>
                     </div>
                 </div>
-                <div className="flex flex-col items-center p-4 bg-ios-blue/5 rounded-apple">
-                    <span className="text-[10px] font-black text-ios-blue uppercase opacity-60 mb-1">조퇴</span>
+                <div className="flex flex-col items-center p-4 bg-ios-rose/5 rounded-apple col-span-2">
+                    <span className="text-[10px] font-black text-ios-rose uppercase opacity-60 mb-1">결석</span>
                     <div className="flex items-baseline gap-1">
-                        <span className="text-2xl font-black text-ios-blue">{stats.earlyLeave}</span>
-                        <span className="text-xs font-bold text-ios-blue/70">일</span>
+                        <span className="text-2xl font-black text-ios-rose">{stats.absent}</span>
+                        <span className="text-xs font-bold text-ios-rose/70">일</span>
                     </div>
                 </div>
             </div>
@@ -538,10 +648,10 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                 <span className="text-[10px] font-bold text-ios-gray">최근 15기록</span>
             </div>
             <div className="space-y-3">
-                {stats.history.length > 0 ? stats.history.map((h, i) => (
+                {stats.history.length > 0 ? (
+                  stats.history.map((h, i) => (
                     <div key={i} className="bg-white p-4 rounded-apple border border-gray-100 shadow-sm space-y-3 transition-all active:scale-[0.98]">
                         <div className="flex items-center justify-between">
-
                             <div className="flex items-center gap-3">
                                 <div className={`w-2 h-2 rounded-full ${h.status === 'present' ? 'bg-ios-emerald' : h.status === 'late' ? 'bg-ios-amber' : h.status === 'early_leave' ? 'bg-ios-blue' : 'bg-ios-rose'}`} />
                                 <div className="space-y-0.5">
@@ -555,11 +665,43 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                 </div>
                             </div>
                             <div className="text-right">
-                                 <p className="text-xs font-black text-ios-gray">{h.time !== '-' ? h.time : '--:--'}</p>
-                                 <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter leading-none">Entry Time</p>
+                                {(() => {
+                                    const now = new Date();
+                                    const todayStr = format(now, 'yyyy-MM-dd');
+                                    const currentTime = format(now, 'HH:mm:ss');
+                                    const isTodayBooking = h.date === todayStr;
+                                    const isAfterSession = h.date < todayStr || (isTodayBooking && h.session_end && currentTime > h.session_end);
+                                    
+                                    if (isAfterSession) {
+                                        if (h.timestamp_in) {
+                                            const start = format(new Date(h.timestamp_in), 'HH:mm');
+                                            const end = h.timestamp_out ? format(new Date(h.timestamp_out), 'HH:mm') : '--:--';
+                                            return (
+                                                <React.Fragment>
+                                                    <p className="text-xs font-black text-ios-gray">{start} ~ {end}</p>
+                                                    <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter leading-none">Actual Study</p>
+                                                </React.Fragment>
+                                            );
+                                        }
+                                        return (
+                                            <React.Fragment>
+                                                <p className="text-xs font-black text-ios-gray">--:--</p>
+                                                <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter leading-none">No Record</p>
+                                            </React.Fragment>
+                                        );
+                                    } else {
+                                        const start = h.session_start ? h.session_start.substring(0, 5) : '--:--';
+                                        const end = h.session_end ? h.session_end.substring(0, 5) : '--:--';
+                                        return (
+                                            <React.Fragment>
+                                                <p className="text-xs font-black text-ios-gray">{start} ~ {end}</p>
+                                                <p className="text-[9px] font-bold text-ios-gray/40 uppercase tracking-tighter leading-none">Session Time</p>
+                                            </React.Fragment>
+                                        );
+                                    }
+                                })()}
                             </div>
                         </div>
-                        
                         {h.content && (
                             <div className="pt-3 border-t border-gray-50 flex gap-3">
                                 <div className="p-2 bg-ios-indigo/5 rounded-apple flex-shrink-0">
@@ -573,8 +715,12 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                             </div>
                         )}
                     </div>
-                )) : (
-                    <div className="py-20 text-center space-y-2"><Calendar className="w-10 h-10 text-gray-200 mx-auto" /><p className="text-xs font-black text-ios-gray">학습 기록이 없습니다.</p></div>
+                  ))
+                ) : (
+                    <div className="py-20 text-center space-y-2">
+                        <Calendar className="w-10 h-10 text-gray-200 mx-auto" />
+                        <p className="text-xs font-black text-ios-gray">학습 기록이 없습니다.</p>
+                    </div>
                 )}
             </div>
         </div>
@@ -617,8 +763,8 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                             const currentTime = format(now, 'HH:mm:ss');
                             const sessionEndTime = b.sessions?.end_time;
 
-                            const att = b.attendance?.[0] || b.attendance; 
-                            const attObj = Array.isArray(att) ? att[0] : att;
+                            const atts = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                            const attObj = atts[0];
                             const isPastSession = isToday && sessionEndTime && currentTime > sessionEndTime;
                             
                             const statusLabel = attObj 
@@ -634,7 +780,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
                                             <p className="text-sm font-black text-[#1C1C1E]">
-                                                {b.sessions?.name}
+                                                {b.sessions?.name || '세션 정보 없음'}
                                             </p>
                                             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${statusColor}`}>
                                                 {statusLabel}
@@ -642,7 +788,7 @@ const ParentMobileView = ({ onLogout, currentUser }) => {
                                         </div>
                                         <p className="text-xs text-ios-gray font-bold">
                                             <Clock className="w-3 h-3 inline-block mr-1 mb-0.5" />
-                                            {b.sessions?.start_time.slice(0,5)} ~ {b.sessions?.end_time.slice(0,5)}
+                                            {(b.sessions?.start_time || '--:--').slice(0,5)} ~ {(b.sessions?.end_time || '--:--').slice(0,5)}
                                         </p>
                                     </div>
                                     <div className="text-right">

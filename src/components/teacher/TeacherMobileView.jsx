@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Check, User, PenTool, Search, LogOut, ChevronRight, ChevronLeft, Menu, MapPin, Clock, X, Map as MapIcon } from 'lucide-react';
+import { Check, User, PenTool, Search, LogOut, ChevronRight, ChevronLeft, Menu, MapPin, Clock, X, Layout, Users, CheckCircle2, Calendar, Pencil, Trophy } from 'lucide-react';
 import { format, addDays, isWithinInterval, parseISO, startOfDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import AttendanceManager from '../admin/AttendanceManager';
+import BookingWizard from '../booking/BookingWizard';
+import SeatManualSelectionModal from '../booking/SeatManualSelectionModal';
 import '../../styles/mobile.css';
 
 const SignaturePad = ({ onSave, onCancel, teacherName }) => {
@@ -132,11 +134,23 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
     const [zones, setZones] = useState([]);
     const [selectedZoneId, setSelectedZoneId] = useState(null);
     const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+    const [reservationViewStep, setReservationViewStep] = useState('search');
+    const [proxySearchQuery, setProxySearchQuery] = useState('');
+    const [proxySearchResults, setProxySearchResults] = useState([]);
+    const [selectedStudent, setSelectedStudent] = useState(null);
+    const [isProxySearching, setIsProxySearching] = useState(false);
+    const [isManualSeatModalOpen, setIsManualSeatModalOpen] = useState(false);
+    const [selectedSeat, setSelectedSeat] = useState(null);
+    const [schoolName, setSchoolName] = useState('');
+    const [rankingData, setRankingData] = useState([]);
+    const [isRankingLoading, setIsRankingLoading] = useState(false);
+    const [quarters, setQuarters] = useState([]);
 
     const todayDate = format(new Date(), 'yyyy-MM-dd');
 
     useEffect(() => {
         fetchInitialData();
+        fetchSchoolInfo();
     }, []);
 
     useEffect(() => {
@@ -166,12 +180,13 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             const firstZoneId = zoneData[0].id;
             setSelectedZoneId(firstZoneId);
 
-            // Fetch operating requirements to find the default date
             const [qData, eData, sData] = await Promise.all([
-                supabase.from('operation_quarters').select('*'),
+                supabase.from('operation_quarters').select('*').order('academic_year', { ascending: false }).order('quarter', { ascending: true }),
                 supabase.from('operation_exceptions').select('*').eq('zone_id', firstZoneId),
                 supabase.from('sessions').select('id').eq('zone_id', firstZoneId)
             ]);
+
+            if (qData.data) setQuarters(qData.data);
 
             if (sData.data && sData.data.length > 0) {
                 const { data: rulesData } = await supabase
@@ -185,7 +200,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             }
         }
         
-        // Final fetch with the determined date
         const { data: supervisionData } = await supabase
             .from('supervision_assignments')
             .select('*')
@@ -193,6 +207,11 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         
         if (supervisionData) setTodayAssignments(supervisionData);
         setLoading(false);
+    };
+
+    const fetchSchoolInfo = async () => {
+        const { data } = await supabase.from('configs').select('value').eq('key', 'school_info').single();
+        if (data?.value?.name_en) setSchoolName(data.value.name_en);
     };
 
     const findNextOperatingDate = (startDate, quarters, exceptions, rules) => {
@@ -209,8 +228,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
 
     const checkIsOperating = (date, quarters, exceptions, rules) => {
         const dStr = format(date, 'yyyy-MM-dd');
-        
-        // 1. Check Quarters
         if (quarters.length > 0) {
             const isInQuarter = quarters.some(q =>
                 q.start_date && q.end_date &&
@@ -221,23 +238,18 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             );
             if (!isInQuarter) return false;
         }
-
-        // 2. Check Exceptions
         const isException = exceptions.some(e => e.exception_date === dStr);
         if (isException) return false;
-
-        // 3. Check Rules (Weekdays)
         if (rules.length > 0) {
             const dayOfWeek = date.getDay();
             const hasRule = rules.some(r => r.day_of_week === dayOfWeek);
             if (!hasRule) return false;
         }
-
         return true;
     };
 
     const fetchSupervisionData = async () => {
-        const { data, error } = await supabase
+        const { data } = await supabase
             .from('supervision_assignments')
             .select('*')
             .eq('date', selectedDate);
@@ -256,10 +268,8 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             
         if (data && data.length > 0) {
             setSessions(data);
-            
             const nowTime = format(new Date(), 'HH:mm:ss');
             let candidate = null;
-
             for (let i = 0; i < data.length; i++) {
                 const s = data[i];
                 if (nowTime <= s.end_time) {
@@ -267,8 +277,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                     break;
                 }
             }
-            // Fallback: If current time is past all sessions, pick the LAST session of the day
-            // instead of the first, as teachers often check attendance after hours.
             setActiveSession(candidate ? candidate.id : data[data.length - 1]?.id);
         }
     };
@@ -286,7 +294,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             return;
         }
 
-        const { data: allDailyBookings, error: bookingsError } = await supabase
+        const { data: allDailyBookings } = await supabase
             .from('bookings')
             .select(`
                 id, seat_id, session_id,
@@ -300,16 +308,13 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             const formatted = allSeats.map(s => {
                 const activeBooking = (allDailyBookings || []).find(b => b.seat_id === s.id && b.session_id === activeSession);
                 const isBookedToday = (allDailyBookings || []).some(b => b.seat_id === s.id);
-                
-                // Handle both array and object responses for attendance join
                 const attData = activeBooking?.attendance;
                 const attendance = Array.isArray(attData) ? attData[0] : attData;
-                
                 const occupant = activeBooking?.profiles_student || activeBooking?.profiles;
 
                 return {
                     seat_id: s.id,
-                    place_id: s.zone_id, // alias for clarity or just use zone_id
+                    place_id: s.zone_id,
                     zone_id: s.zone_id,
                     seat_number: s.seat_number,
                     display_number: s.display_number,
@@ -327,7 +332,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                     is_booked_today: isBookedToday
                 };
             });
-            
             formatted.sort((a, b) => (a.seat_number || '').localeCompare(b.seat_number || '', undefined, { numeric: true, sensitivity: 'base' }));
             setAttendanceData(formatted);
         }
@@ -343,7 +347,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         if (uploadError) return alert('이미지 저장 오류');
 
         const { data: { publicUrl } } = supabase.storage.from('signatures').getPublicUrl(fileName);
-
         const { error: updateError } = await supabase
             .from('supervision_assignments')
             .update({ signature_url: publicUrl })
@@ -365,22 +368,17 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
     const toggleAttendance = async (item) => {
         if (item.status !== 'absent') return;
         const nextStatus = 'present';
-
         const upsertData = {
             booking_id: item.booking_id,
             status: nextStatus,
             updated_at: new Date().toISOString()
         };
 
-        // Only include ID if it is a valid update (to prevent passing undefined)
-        if (item.attendance_id) {
-            upsertData.id = item.attendance_id;
-        }
+        if (item.attendance_id) upsertData.id = item.attendance_id;
 
         if (!item.timestamp_in) {
             const currentSessionData = sessions.find(s => s.id === activeSession);
             if (currentSessionData) {
-                // Formatting: ensure HH:mm:ss
                 const startTime = currentSessionData.start_time.length === 5 
                     ? currentSessionData.start_time + ':00' 
                     : currentSessionData.start_time;
@@ -398,8 +396,7 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
             .single();
 
         if (error) {
-            console.error('[Attendance Update Error]', error.message, error.details);
-            // Re-fetch to sync if local state might be stale
+            console.error('[Attendance Update Error]', error);
             fetchAttendanceList();
             return;
         }
@@ -415,13 +412,8 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
 
     const resetAttendance = async (item) => {
         if (!item.attendance_id) return;
-        
         try {
-            const { error } = await supabase
-                .from('attendance')
-                .delete()
-                .eq('id', item.attendance_id);
-
+            const { error } = await supabase.from('attendance').delete().eq('id', item.attendance_id);
             if (error) throw error;
             fetchAttendanceList();
         } catch (error) {
@@ -429,12 +421,103 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         }
     };
 
-    const scrollToZone = (zone) => {
-        zoneRefs[zone]?.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
+    const handleLogout = () => { if (onLogout) onLogout(); };
 
-    const handleLogout = () => {
-        if (onLogout) onLogout();
+    const fetchRankingData = async () => {
+        setIsRankingLoading(true);
+        try {
+            // Determine current academic year
+            const now = new Date();
+            const monthVal = now.getMonth() + 1;
+            const currentYear = monthVal < 3 ? now.getFullYear() - 1 : now.getFullYear();
+
+            // Find the start date of the academic year (minimum start_date for this year)
+            const yearQuarters = quarters.filter(q => q.academic_year === currentYear && q.start_date);
+            const startDates = yearQuarters.map(q => parseISO(q.start_date));
+            const academicStart = startDates.length > 0 ? format(new Date(Math.min(...startDates)), 'yyyy-MM-dd') : `${currentYear}-03-01`;
+
+            const { data: bookings } = await supabase
+                .from('bookings')
+                .select(`
+                    date,
+                    profiles(full_name, username),
+                    profiles_student(full_name, username),
+                    sessions(end_time),
+                    attendance(timestamp_in, timestamp_out, status)
+                `)
+                .gte('date', academicStart)
+                .lte('date', todayDate);
+
+            if (bookings) {
+                const studentStats = {};
+
+                bookings.forEach(b => {
+                    const student = b.profiles_student || b.profiles;
+                    if (!student) return;
+
+                    const attendeeList = Array.isArray(b.attendance) ? b.attendance : [b.attendance];
+                    
+                    attendeeList.forEach(attendee => {
+                        // Only count if confirmed or has timestamp_in
+                        if (!attendee || !attendee.timestamp_in) return;
+                        if (attendee.status === 'absent') return;
+
+                        const startTime = new Date(attendee.timestamp_in);
+                        let endTime;
+
+                        if (attendee.timestamp_out) {
+                            endTime = new Date(attendee.timestamp_out);
+                        } else {
+                            // Handle missing checkout
+                            if (b.date === todayDate) {
+                                // Ongoing today
+                                endTime = new Date();
+                            } else {
+                                // Past date: Cap at session end time or end of day
+                                try {
+                                    if (b.sessions?.end_time) {
+                                        // Combine booking date and session end_time
+                                        endTime = new Date(`${b.date}T${b.sessions.end_time}:00`);
+                                    } else {
+                                        // Fallback to end of day
+                                        endTime = new Date(`${b.date}T23:59:59`);
+                                    }
+                                } catch (e) {
+                                    endTime = startTime; // Fallback
+                                }
+                            }
+                        }
+                        
+                        const durationMs = Math.max(0, endTime - startTime);
+                        const durationMin = Math.floor(durationMs / (1000 * 60));
+
+                        // Cap individual duration at 14 hours to prevent extreme data errors
+                        const finalDuration = Math.min(durationMin, 14 * 60);
+
+                        if (finalDuration <= 0) return;
+
+                        if (!studentStats[student.username]) {
+                            studentStats[student.username] = {
+                                name: student.full_name,
+                                username: student.username,
+                                totalMinutes: 0
+                            };
+                        }
+                        studentStats[student.username].totalMinutes += finalDuration;
+                    });
+                });
+
+                const sortedData = Object.values(studentStats)
+                    .sort((a, b) => b.totalMinutes - a.totalMinutes)
+                    .slice(0, 50);
+
+                setRankingData(sortedData);
+            }
+        } catch (err) {
+            console.error('Error fetching cumulative ranking data:', err);
+        } finally {
+            setIsRankingLoading(false);
+        }
     };
 
     const changeDate = (days) => {
@@ -443,131 +526,53 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         setSelectedDate(format(date, 'yyyy-MM-dd'));
     };
 
-    // NEW: Drag Scroll Logic for Seatmap
-    useEffect(() => {
-        // Drag-scroll moved to AttendanceManager for better integration with Fabric events
-    }, [currentView]);
-
     const renderHeader = () => {
-        // Find current zone name
-        const zoneObj = zones.find(z => z.id === selectedZoneId);
-        const zoneName = zoneObj?.name || '청람재';
-        
-        const dateStr = format(new Date(), 'yyyy년 M월 d일');
-        const dayStr = ['일','월','화','수','목','금','토'][new Date().getDay()];
-        
-        let title = `${zoneName} 감독`;
-        let subTitle = `(${dateStr}(${dayStr}))`;
-        
-        if (currentView === 'supervision') {
-            title = '감독 서명';
-            subTitle = '';
-        }
-        if (currentView === 'attendance' || currentView === 'seatmap') {
-            title = '출결 체크';
-            subTitle = '';
-        }
+        if (currentView === 'attendance' || currentView === 'reservation' || currentView === 'supervision' || currentView === 'ranking') {
+            const title = 
+                currentView === 'attendance' ? '출결 체크' : 
+                currentView === 'reservation' ? '학생 좌석 예약' : 
+                currentView === 'ranking' ? '학습 랭킹' :
+                '감독 서명';
 
-        const zoneLetter = zoneObj?.code || 'A';
-        const zoneFullName = zoneObj?.name || 'A ZONE';
-
-        // Use all attendance data for stats to reflect the full list view (Zones A, B, C)
-        const presentCount = attendanceData.filter(d => d.status === 'present').length;
-        const absentCount = attendanceData.filter(d => d.is_active && (d.status === 'absent' || !d.status)).length;
+            return (
+                <div className="mobile-header flex items-center justify-between px-6 py-4 bg-white border-b border-gray-100 z-50">
+                    <button 
+                        onClick={() => {
+                            if (currentView === 'reservation' && reservationViewStep === 'booking') {
+                                setReservationViewStep('search');
+                                setSelectedStudent(null);
+                            } else {
+                                setCurrentView('menu');
+                            }
+                        }}
+                        className="p-2 -ml-2 text-gray-400 hover:text-black active:scale-95 transition-all"
+                    >
+                        <ChevronLeft className="w-6 h-6" />
+                    </button>
+                    <h1 className="mobile-header-title text-lg font-black text-[#1C1C1E] tracking-tight">{title}</h1>
+                    <div className="w-10" />
+                </div>
+            );
+        }
 
         return (
-            <header className="flex-none glass-header px-6 pt-4 pb-4 flex flex-col gap-5 z-50">
-                <div className="flex justify-between items-center">
-                    <div className="flex flex-col">
-                        <h1 className="text-2xl font-black text-[#1C1C1E] tracking-tight">학습실 감독</h1>
-                        <p className="text-[10px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70">Study Cafe Manager</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {currentView === 'attendance' && (
-                            <button 
-                                onClick={() => setCurrentView('seatmap')}
-                                className="px-3 py-2.5 bg-ios-indigo/10 text-ios-indigo rounded-apple-md ios-tap border border-ios-indigo/10 text-[12px] font-black whitespace-nowrap"
-                            >
-                                좌석표로 보기
-                            </button>
-                        )}
-                        {currentView !== 'menu' ? (
-                            <button 
-                                onClick={() => setCurrentView(currentView === 'seatmap' ? 'attendance' : 'menu')}
-                                className="px-4 py-2.5 bg-gray-200/20 text-ios-gray rounded-apple-md ios-tap border border-white/40 text-[13px] font-black"
-                            >
-                                {currentView === 'seatmap' ? '뒤로' : '메뉴'}
-                            </button>
-                        ) : (
-                            <button onClick={handleLogout} className="p-2.5 bg-ios-rose/10 text-ios-rose rounded-apple-md ios-tap border border-ios-rose/10">
-                                <LogOut className="w-5 h-5" />
-                            </button>
-                        )}
-                    </div>
+            <header className="flex-none glass-header px-6 pt-4 pb-4 flex items-center justify-between shadow-sm z-50 bg-white/80 backdrop-blur-xl border-b border-gray-100">
+                <div className="flex flex-col">
+                    <h1 className="text-xl font-black text-[#1C1C1E] tracking-tight">{schoolName.split(' ')[0] || '학습실 카페'}</h1>
+                    <p className="text-[9px] font-black text-ios-indigo tracking-[0.2em] uppercase opacity-70 leading-none mt-1">Study Cafe Manager</p>
                 </div>
-
-                {(currentView === 'attendance' || currentView === 'seatmap' || currentView === 'supervision') && (
-                    <div className="flex flex-col gap-5 animate-in fade-in slide-in-from-top-4 duration-300">
-                        {/* Zone Selection & Date Navigation */}
-                        <div className="flex gap-2 items-stretch">
-                            <div className="flex-1 bg-[#1C1C1E] p-1 rounded-apple-md border border-white/10 flex items-center justify-center min-h-[38px] shadow-sm">
-                                <span className="text-[12px] font-black text-white px-2">
-                                    {zoneName}
-                                </span>
-                            </div>
-
-                            <div className="flex-[2] flex items-center justify-between bg-gray-200/20 px-2 rounded-apple-md border border-white/40 backdrop-blur-xl min-h-[38px]">
-                                <button 
-                                    onClick={() => changeDate(-1)}
-                                    className="w-8 h-8 flex items-center justify-center text-ios-gray ios-tap"
-                                >
-                                    <ChevronLeft className="w-4 h-4" />
-                                </button>
-                                <span className="text-[13px] font-black text-[#1C1C1E]">
-                                    {selectedDate} ({['일','월','화','수','목','금','토'][new Date(selectedDate).getDay()]})
-                                </span>
-                                <button 
-                                    onClick={() => changeDate(1)}
-                                    className="w-8 h-8 flex items-center justify-center text-ios-gray ios-tap"
-                                >
-                                    <ChevronRight className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Attendance-specific controls */}
-                        {(currentView === 'attendance' || currentView === 'seatmap') && (
-                            <>
-                                <div className="flex bg-gray-200/20 p-1 rounded-apple-md border border-white/40 overflow-x-auto scrollbar-hide">
-                                    {sessions.map(s => (
-                                        <button
-                                            key={s.id}
-                                            onClick={() => setActiveSession(s.id)}
-                                            className={`flex-1 px-3 py-2.5 rounded-apple-md text-xs font-black whitespace-nowrap transition-all ios-tap ${
-                                                activeSession === s.id 
-                                                    ? 'bg-ios-indigo text-white shadow-lg shadow-ios-indigo/20' 
-                                                    : 'bg-white/50 text-ios-gray border border-gray-100'
-                                            }`}
-                                        >
-                                            {s.name}
-                                        </button>
-                                    ))}
-                                </div>
-
-                                <div className="flex gap-3 h-20">
-                                    <div className="flex-1 bg-white shadow-sm border border-gray-100 rounded-apple p-3 flex flex-col justify-center items-center font-black">
-                                        <span className="text-[10px] text-ios-blue uppercase tracking-wider mb-1">현재 출석</span>
-                                        <span className="text-2xl text-[#1C1C1E]">{presentCount}명</span>
-                                    </div>
-                                    <div className="flex-1 bg-white shadow-sm border border-gray-100 rounded-apple p-3 flex flex-col justify-center items-center font-black">
-                                        <span className="text-[10px] text-ios-rose uppercase tracking-wider mb-1">미입실/결석</span>
-                                        <span className="text-2xl text-[#1C1C1E]">{absentCount}명</span>
-                                    </div>
-                                </div>
-                            </>
-                        )}
+                <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-end">
+                        <span className="text-[9px] font-black text-ios-gray uppercase tracking-widest leading-none mb-1">선생님</span>
+                        <span className="text-sm font-black text-[#1C1C1E]">{currentUser?.full_name}</span>
                     </div>
-                )}
+                    <button 
+                        onClick={handleLogout}
+                        className="p-2 bg-ios-rose/5 text-ios-rose border border-ios-rose/10 rounded-apple-md ios-tap transition-all hover:bg-ios-rose/10"
+                    >
+                        <LogOut className="w-4 h-4" />
+                    </button>
+                </div>
             </header>
         );
     };
@@ -575,23 +580,29 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
     const renderMenuView = () => (
         <div className="mobile-menu-container">
             <div className="mobile-menu-grid">
-                <button 
-                    onClick={() => setCurrentView('supervision')}
-                    className="mobile-menu-btn"
-                >
+                <button onClick={() => setCurrentView('supervision')} className="mobile-menu-btn">
                     <div className="mobile-menu-btn-icon bg-blue-50">
                         <PenTool className="w-8 h-8 text-[#007AFF]" />
                     </div>
                     <span className="mobile-menu-btn-text">감독 서명</span>
                 </button>
-                <button 
-                    onClick={() => setCurrentView('attendance')}
-                    className="mobile-menu-btn"
-                >
+                <button onClick={() => setCurrentView('attendance')} className="mobile-menu-btn">
                     <div className="mobile-menu-btn-icon bg-rose-50">
                         <Check className="w-8 h-8 text-[#FF3B30]" />
                     </div>
                     <span className="mobile-menu-btn-text">출결 체크</span>
+                </button>
+                <button onClick={() => { setCurrentView('reservation'); setReservationViewStep('search'); }} className="mobile-menu-btn">
+                    <div className="mobile-menu-btn-icon bg-indigo-50">
+                        <Calendar className="w-8 h-8 text-ios-indigo" />
+                    </div>
+                    <span className="mobile-menu-btn-text">학생 좌석 예약</span>
+                </button>
+                <button onClick={() => { setCurrentView('ranking'); fetchRankingData(); }} className="mobile-menu-btn">
+                    <div className="mobile-menu-btn-icon bg-amber-50">
+                        <Trophy className="w-8 h-8 text-ios-amber" />
+                    </div>
+                    <span className="mobile-menu-btn-text">학습 랭킹</span>
                 </button>
             </div>
             {todayDate && (
@@ -602,61 +613,30 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
         </div>
     );
 
-    const renderSupervisionView = () => {
-        const now = new Date();
-        const currentTime = format(now, 'HH:mm:ss');
-        const lastSessionEnd = sessions.length > 0 
-            ? sessions.reduce((max, s) => s.end_time > max ? s.end_time : max, '00:00:00')
-            : '23:59:59';
-        
-        const todayStr = format(now, 'yyyy-MM-dd');
-        const isPastDate = selectedDate < todayStr;
-        const isToday = selectedDate === todayStr;
-        const isFutureDate = selectedDate > todayStr;
-        const isExpired = currentUser?.role !== 'admin' && isPastDate;
-        const limitedFuture = currentUser?.role !== 'admin' && isFutureDate;
-
-        return (
-            <main className="flex-1 flex flex-col h-full overflow-hidden" style={{ padding: '0 1rem 1rem 1rem' }}>
-                <div className="flex-1 flex flex-col gap-4 h-full overflow-y-auto pb-6 pt-2">
-                    {todayAssignments.map((assign, index) => (
-                        <div 
-                            key={assign.id} 
-                            className="flex-1 min-h-[300px] bg-white rounded-[32px] p-6 border border-gray-100 shadow-sm flex flex-col items-center justify-center"
-                        >
-                            <div className="flex flex-col items-center gap-4 w-full">
-                                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center shadow-inner">
-                                    <User className="w-8 h-8 text-[#8E8E93]" />
-                                </div>
-                                <div className="text-center">
-                                    <h3 className="text-lg font-black text-[#1C1C1E]">{assign.supervisor_name} 선생님</h3>
-                                    {assign.signature_url ? (
-                                        <p className="mt-1.5 text-xs font-bold text-emerald-500 flex items-center justify-center gap-1.5">
-                                            <Check className="w-4 h-4" /> 감독교사 서명 완료
-                                        </p>
-                                    ) : (
-                                        <p className="mt-1.5 text-xs font-bold text-[#FF9500]">감독 확인 서명이 필요합니다</p>
-                                    )}
-                                </div>
-                                
-                                {!assign.signature_url && (
-                                    limitedFuture ? (
-                                        <div className="w-full py-5 bg-gray-50 text-gray-400 rounded-2xl text-center border border-gray-100">
-                                            <p className="text-sm font-bold">서명은 당일에만 가능합니다.</p>
-                                        </div>
-                                    ) : isExpired ? (
-                                        <div className="w-full py-5 bg-gray-50 text-gray-400 rounded-2xl text-center border border-gray-100">
-                                            <p className="text-sm font-bold">감독 시간이 종료되어 서명할 수 없습니다.</p>
-                                        </div>
-                                    ) : (
-                                        <button 
-                                            onClick={() => { setSelectedTeacher(assign); setShowSignPad(true); }}
-                                            className="w-full py-5 bg-[#007AFF] text-white rounded-2xl text-base font-black mobile-tap-feedback shadow-lg shadow-blue-100"
-                                        >
-                                            서명하기
-                                        </button>
-                                    )
+    const renderSupervisionView = () => (
+        <main className="flex-1 flex flex-col h-full overflow-hidden" style={{ padding: '0 1rem 1rem 1rem' }}>
+            <div className="flex-1 flex flex-col gap-4 h-full overflow-y-auto pb-6 pt-2">
+                {todayAssignments.map((assign) => (
+                    <div key={assign.id} className="flex-1 min-h-[300px] bg-white rounded-[32px] p-6 border border-gray-100 shadow-sm flex flex-col items-center justify-center">
+                        <div className="flex flex-col items-center gap-4 w-full">
+                            <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center shadow-inner">
+                                <User className="w-8 h-8 text-[#8E8E93]" />
+                            </div>
+                            <div className="text-center">
+                                <h3 className="text-lg font-black text-[#1C1C1E]">{assign.supervisor_name} 선생님</h3>
+                                {assign.signature_url ? (
+                                    <p className="mt-1.5 text-xs font-bold text-emerald-500 flex items-center justify-center gap-1.5">
+                                        <Check className="w-4 h-4" /> 감독교사 서명 완료
+                                    </p>
+                                ) : (
+                                    <p className="mt-1.5 text-xs font-bold text-[#FF9500]">감독 확인 서명이 필요합니다</p>
                                 )}
+                            </div>
+                            {!assign.signature_url && (
+                                <button onClick={() => { setSelectedTeacher(assign); setShowSignPad(true); }} className="w-full py-5 bg-[#007AFF] text-white rounded-2xl text-base font-black mobile-tap-feedback shadow-lg shadow-blue-100">
+                                    서명하기
+                                </button>
+                            )}
                             {assign.signature_url && (
                                 <div className="w-full bg-gray-50 rounded-2xl p-4 flex items-center justify-center border border-dashed border-gray-200 min-h-[100px]">
                                     <img src={assign.signature_url} alt="Signature" className="max-h-16 opacity-60 object-contain" />
@@ -665,12 +645,6 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                         </div>
                     </div>
                 ))}
-                
-                {/* 1명만 감독할 경우 레이아웃 유지를 위해 dummy 추가 */}
-                {todayAssignments.length === 1 && (
-                    <div className="flex-1 min-h-0 p-6 border border-transparent opacity-0 pointer-events-none" />
-                )}
-
                 {todayAssignments.length === 0 && (
                     <div className="flex-1 bg-white rounded-[32px] border border-dashed border-gray-200 text-gray-400 text-center flex items-center justify-center p-6">
                         <p className="text-base font-bold">오늘 배정된 감독 교사가 없습니다.</p>
@@ -678,155 +652,188 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                 )}
             </div>
         </main>
-        );
-    };
+    );
 
     const renderAttendanceView = () => (
         <main className="mobile-attendance-list">
-                <div className="mobile-zone-grid">
-                    {['A', 'B', 'C'].map(zoneLetter => {
-                        const zoneFullName = `${zoneLetter} zone`;
-                        const zoneSeats = attendanceData.filter(item => 
-                            item.zone_name === zoneFullName || 
-                            item.zone_name === zoneLetter || 
-                            (item.seat_number && item.seat_number.startsWith(zoneLetter))
-                        );
-                        const fallbackColor = zoneLetter === 'A' ? '#34C759' : zoneLetter === 'B' ? '#FF9500' : '#FF3B30';
-
-                        return (
-                            <div key={zoneLetter} className="zone-column" ref={zoneRefs[zoneLetter]}>
-                                <div className="zone-title-bar" style={{ backgroundColor: zoneSeats[0]?.zone_color || fallbackColor }}>
-                                    {zoneLetter} ZONE
-                                </div>
-                                <div className="zone-divider" />
-                                <div className="zone-seats-list">
-                                    {zoneSeats.map((item) => {
-                                        const tierClass = item.is_active ? 'tier-active' : item.is_booked_today ? 'tier-reserved' : 'tier-empty';
-                                        const headerColor = item.zone_color || fallbackColor;
-                                        const dotColor = item.status === 'present' ? 'green' : 'red';
-
-                                        return (
-                                            <div key={item.seat_id} className={`mobile-grid-card ${tierClass}`}>
-                                                <div className="grid-card-header" style={{ backgroundColor: headerColor }}>
-                                                    {item.display_number || item.seat_number.replace(`${zoneLetter}-`, '')}
-                                                    {item.is_active && <div className={`status-dot ${dotColor}`} />}
-                                                </div>
-                                                <div className="grid-card-body">
-                                                    {item.full_name ? (
-                                                        <>
-                                                            <span className="grid-card-student">{item.full_name}</span>
-                                                            <span className="grid-card-id">{item.username || '학번 없음'}</span>
-                                                        </>
-                                                    ) : (
-                                                        <span className="grid-card-info text-gray-300">공석</span>
-                                                    )}
-                                                </div>
-                                                <div className="grid-card-footer">
-                                                    {item.full_name ? (
-                                                        (() => {
-                                                            const session = sessions.find(s => s.id === activeSession);
-                                                            const nowTime = format(new Date(), 'HH:mm:ss');
-                                                            const isPastDate = selectedDate < todayDate;
-                                                            const isToday = selectedDate === todayDate;
-                                                            const sessionEnded = session && nowTime > session.end_time;
-                                                            const isExpired = isPastDate || (isToday && sessionEnded);
-
-                                                            if (item.status === 'absent') {
-                                                                return (
-                                                                    <>
-                                                                        <div className="grid-status-btn status-absent-btn">
-                                                                            {isExpired ? '결석' : '미출석'}
-                                                                        </div>
-                                                                        <button 
-                                                                            className="grid-action-btn"
-                                                                            onClick={() => toggleAttendance(item)}
-                                                                            style={{ backgroundColor: headerColor }}
-                                                                        >
-                                                                            출석처리
-                                                                        </button>
-                                                                    </>
-                                                                );
-                                                            } else {
-                                                                const statusLabel = 
-                                                                    item.status === 'present' ? (isExpired ? '학습완료' : '학습중') :
-                                                                    item.status === 'late' ? '지각' : '조퇴';
-
-                                                                return (
-                                                                    <>
-                                                                        <div 
-                                                                            className={`grid-status-btn ${
-                                                                                item.status === 'present' ? 'status-present-active' :
-                                                                                item.status === 'late' ? 'status-late-active' :
-                                                                                'status-early-active'
-                                                                            }`}
-                                                                            style={{ backgroundColor: item.status === 'present' ? headerColor : undefined }}
-                                                                        >
-                                                                            {statusLabel}
-                                                                        </div>
-                                                                        <button 
-                                                                            className="grid-action-btn subtle" 
-                                                                            onClick={() => resetAttendance(item)}
-                                                                        >
-                                                                            결석처리
-                                                                        </button>
-                                                                    </>
-                                                                );
-                                                            }
-                                                        })()
-                                                    ) : (
-                                                        <div className="grid-status-btn status-absent-btn opacity-20">-</div>
-                                                    )}
-                                                </div>
+            <div className="mobile-zone-grid">
+                {['A', 'B', 'C'].map(zoneLetter => {
+                    const zoneSeats = attendanceData.filter(item => item.zone_name?.startsWith(zoneLetter) || item.seat_number?.startsWith(zoneLetter));
+                    const fallbackColor = zoneLetter === 'A' ? '#34C759' : zoneLetter === 'B' ? '#FF9500' : '#FF3B30';
+                    return (
+                        <div key={zoneLetter} className="zone-column">
+                            <div className="zone-title-bar" style={{ backgroundColor: zoneSeats[0]?.zone_color || fallbackColor }}>{zoneLetter} ZONE</div>
+                            <div className="zone-divider" />
+                            <div className="zone-seats-list">
+                                {zoneSeats.map((item) => {
+                                    const tierClass = item.is_active ? 'tier-active' : item.is_booked_today ? 'tier-reserved' : 'tier-empty';
+                                    const headerColor = item.zone_color || fallbackColor;
+                                    const dotColor = item.status === 'present' ? 'green' : 'red';
+                                    return (
+                                        <div key={item.seat_id} className={`mobile-grid-card ${tierClass}`}>
+                                            <div className="grid-card-header" style={{ backgroundColor: headerColor }}>
+                                                {item.display_number || item.seat_number.replace(`${zoneLetter}-`, '')}
+                                                {item.is_active && <div className={`status-dot ${dotColor}`} />}
                                             </div>
-                                        );
-                                    })}
+                                            <div className="grid-card-body">
+                                                {item.full_name ? (
+                                                    <><span className="grid-card-student">{item.full_name}</span><span className="grid-card-id">{item.username}</span></>
+                                                ) : <span className="grid-card-info text-gray-300">공석</span>}
+                                            </div>
+                                            <div className="grid-card-footer">
+                                                {item.full_name ? (
+                                                    item.status === 'absent' ? (
+                                                        <><div className="grid-status-btn status-absent-btn">미출석</div><button className="grid-action-btn" onClick={() => toggleAttendance(item)} style={{ backgroundColor: headerColor }}>출석처리</button></>
+                                                    ) : (
+                                                        <><div className={`grid-status-btn ${item.status === 'present' ? 'status-present-active' : item.status === 'late' ? 'status-late-active' : 'status-early-active'}`} style={{ backgroundColor: item.status === 'present' ? headerColor : undefined }}>{item.status === 'present' ? '학습중' : '지각'}</div><button className="grid-action-btn subtle" onClick={() => resetAttendance(item)}>결석처리</button></>
+                                                    )
+                                                ) : <div className="grid-status-btn status-absent-btn opacity-20">-</div>}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </main>
+    );
+
+    const renderRankingView = () => {
+        const now = new Date();
+        const monthVal = now.getMonth() + 1;
+        const currentYear = monthVal < 3 ? now.getFullYear() - 1 : now.getFullYear();
+        const yearQuarters = quarters.filter(q => q.academic_year === currentYear && q.start_date);
+        const startDates = yearQuarters.map(q => parseISO(q.start_date));
+        const academicStartStr = startDates.length > 0 ? format(new Date(Math.min(...startDates)), 'yyyy.MM.dd') : `${currentYear}.03.01`;
+
+        return (
+            <main className="flex-1 flex flex-col h-full overflow-hidden bg-gray-50/50">
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-20">
+                    <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm mb-4">
+                        <p className="text-xs font-bold text-ios-gray uppercase tracking-widest leading-none mb-1">집계 기간</p>
+                        <p className="text-base font-black text-[#1C1C1E]">
+                            {academicStartStr} ~ 오늘
+                            <span className="ml-2 px-2 py-0.5 bg-ios-amber/10 text-ios-amber text-[10px] rounded-full">누적</span>
+                        </p>
+                    </div>
+
+                    {isRankingLoading ? (
+                        <div className="flex-1 flex items-center justify-center py-20">
+                            <div className="inline-block w-8 h-8 border-4 border-ios-amber/20 border-t-ios-amber rounded-full animate-spin"></div>
+                        </div>
+                    ) : rankingData.length > 0 ? (
+                        rankingData.map((student, index) => (
+                            <div key={student.username} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: `${index * 50}ms` }}>
+                                <div className="flex items-center gap-4">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-sm ${
+                                        index === 0 ? 'bg-amber-100 text-ios-amber ring-2 ring-amber-50' : 
+                                        index === 1 ? 'bg-slate-100 text-slate-500' : 
+                                        index === 2 ? 'bg-orange-100 text-orange-600' : 
+                                        'bg-gray-50 text-gray-400'
+                                    }`}>
+                                        {index + 1}
+                                    </div>
+                                    <div>
+                                        <p className="text-base font-black text-[#1C1C1E]">{student.name}</p>
+                                        <p className="text-[10px] font-bold text-ios-gray uppercase tracking-tighter">{student.username}</p>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm font-black text-ios-amber">
+                                        {student.totalMinutes >= 60 
+                                            ? `${Math.floor(student.totalMinutes / 60)}시간 ${student.totalMinutes % 60}분` 
+                                            : `${student.totalMinutes}분`
+                                        }
+                                    </p>
+                                    <p className="text-[9px] font-bold text-ios-gray uppercase tracking-widest leading-none mt-1">총 학습 시간</p>
                                 </div>
                             </div>
-                        );
-                    })}
+                        ))
+                    ) : (
+                        <div className="py-20 text-center bg-white rounded-[32px] border border-dashed border-gray-200">
+                            <Trophy className="w-12 h-12 text-gray-200 mx-auto mb-4" />
+                            <p className="text-sm font-bold text-gray-400">데이터가 없습니다.</p>
+                            <p className="text-[10px] text-gray-300 mt-2 px-8">이번 학년도에 공부한 학생 데이터가 아직 없습니다.</p>
+                        </div>
+                    )}
                 </div>
+            </main>
+        );
+    };
 
-                {attendanceData.length === 0 && !loading && (
-                    <div className="text-center py-12">
-                        <Clock className="w-8 h-8 text-gray-200 mx-auto mb-2" />
-                        <p className="text-xs text-gray-300 font-bold">진행 중인 세션이 없습니다.</p>
+    const handleProxySearch = async (queryInput) => {
+        const query = queryInput.trim();
+        if (!query) return;
+        setIsProxySearching(true);
+        try {
+            const { data } = await supabase.from('profiles_student').select('*').or(`full_name.ilike.%${query}%,username.ilike.%${query}%`).limit(20);
+            setProxySearchResults(data || []);
+        } catch (err) { console.error('Search Exception:', err); }
+        finally { setIsProxySearching(false); }
+    };
+
+    const renderReservationView = () => (
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+            {reservationViewStep === 'search' ? (
+                <div className="flex-1 overflow-y-auto bg-gray-50/50 p-4">
+                    <div className="max-w-md mx-auto space-y-6">
+                        <div className="space-y-2"><h2 className="text-xl font-black text-[#1C1C1E]">학생 검색</h2><p className="text-sm font-bold text-ios-gray">이름 또는 학번을 입력하세요.</p></div>
+                        <div className="relative group">
+                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 group-focus-within:text-ios-indigo transition-colors" />
+                            <input type="text" placeholder="검색..." value={proxySearchQuery} onChange={(e) => { setProxySearchQuery(e.target.value); handleProxySearch(e.target.value); }} className="w-full bg-white border border-gray-100 rounded-2xl py-4 pl-12 pr-4 text-base font-bold shadow-sm outline-none focus:ring-2 focus:ring-ios-indigo/10" />
+                        </div>
+                        <div className="space-y-3 pb-8">
+                            {isProxySearching ? <div className="text-center py-8"><div className="inline-block w-6 h-6 border-4 border-ios-indigo/20 border-t-ios-indigo rounded-full animate-spin"></div></div> :
+                                proxySearchResults.map(student => (
+                                    <button key={student.id} onClick={() => { setSelectedStudent(student); setReservationViewStep('booking'); setSelectedSeat(null); }} className="w-full bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between group">
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"><Users className="w-5 h-5 text-gray-400" /></div>
+                                            <div className="text-left"><p className="text-base font-black text-[#1C1C1E]">{student.full_name}</p><p className="text-xs font-bold text-ios-gray uppercase">{student.username}</p></div>
+                                        </div>
+                                        <ChevronRight className="w-5 h-5 text-gray-300" />
+                                    </button>
+                                ))
+                            }
+                        </div>
                     </div>
-                )}
-        </main>
+                </div>
+            ) : (
+                <div className="flex-1 flex flex-col overflow-hidden bg-white">
+                    <div className="flex-none p-4 border-b border-gray-50 flex items-center justify-between bg-white/80 backdrop-blur sticky top-0 z-20">
+                        <div className="flex items-center gap-3"><div className="w-8 h-8 rounded-full bg-ios-indigo/10 flex items-center justify-center"><Users className="w-4 h-4 text-ios-indigo" /></div><div><p className="text-sm font-black text-[#1C1C1E]">{selectedStudent?.full_name} ({selectedStudent?.username})</p></div></div>
+                        <button onClick={() => { setSelectedStudent(null); setReservationViewStep('search'); }} className="text-xs font-black text-ios-indigo bg-ios-indigo/5 px-3 py-1.5 rounded-full">변경</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto scrollbar-hide">
+                        <BookingWizard selectedSeat={selectedSeat} onComplete={() => { setCurrentView('menu'); setSelectedStudent(null); setReservationViewStep('search'); }} targetUser={selectedStudent} loggedInUser={currentUser} initialDate={selectedDate} onDateChange={setSelectedDate} currentZoneId={selectedZoneId || (zones.length > 0 ? zones[0].id : null)} onOpenSeatModal={() => setIsManualSeatModalOpen(true)} />
+                    </div>
+                </div>
+            )}
+        </div>
     );
 
     return (
         <div className="mobile-dashboard-container h-[100dvh] overflow-hidden flex flex-col">
             {renderHeader()}
-            
-            {loading && <div className="flex-1 flex items-center justify-center"><p className="text-sm font-bold text-gray-400">로딩 중...</p></div>}
-            
-            {!loading && currentView === 'menu' && renderMenuView()}
-            {!loading && currentView === 'supervision' && renderSupervisionView()}
-            {!loading && currentView === 'attendance' && renderAttendanceView()}
-            {!loading && currentView === 'seatmap' && (
-                <div 
-                    ref={seatmapRef} 
-                    className="mobile-seatmap-container flex-1 scrollbar-hide bg-[#F2F2F7] relative overflow-auto"
-                >
+            {loading ? <div className="flex-1 flex items-center justify-center"><p className="text-sm font-bold text-gray-400">로딩 중...</p></div> : (
+                <>
+                    {currentView === 'menu' && renderMenuView()}
+                    {currentView === 'supervision' && renderSupervisionView()}
+                    {currentView === 'attendance' && renderAttendanceView()}
+                    {currentView === 'reservation' && renderReservationView()}
+                    {currentView === 'ranking' && renderRankingView()}
+                </>
+            )}
+            <SeatManualSelectionModal isOpen={isManualSeatModalOpen} onClose={() => setIsManualSeatModalOpen(false)} zoneId={selectedZoneId || (zones.length > 0 ? zones[0].id : null)} currentUser={selectedStudent || currentUser} onOpenMap={() => alert('모바일에서는 좌석 번호 선택기를 권장합니다.')} onSelect={(seat) => { setSelectedSeat(seat); setIsManualSeatModalOpen(false); }} />
+            {currentView === 'seatmap' && !loading && (
+                <div ref={seatmapRef} className="mobile-seatmap-container flex-1 scrollbar-hide bg-[#F2F2F7] relative overflow-auto">
                     <div className="mobile-seatmap-content bg-white shadow-xl">
-                        <AttendanceManager 
-                            isMobileView={true} 
-                            externalZoneId={selectedZoneId}
-                            externalDate={selectedDate}
-                            externalSessionId={activeSession}
-                        />
+                        <AttendanceManager isMobileView={true} externalZoneId={selectedZoneId} externalDate={selectedDate} externalSessionId={activeSession} onClose={() => setCurrentView('attendance')} />
                     </div>
                 </div>
             )}
-
-            {showSignPad && (
-                <SignaturePad 
-                    teacherName={selectedTeacher?.supervisor_name}
-                    onSave={handleSignatureSave}
-                    onCancel={() => setShowSignPad(false)}
-                />
-            )}
+            {showSignPad && <SignaturePad teacherName={selectedTeacher?.supervisor_name} onSave={handleSignatureSave} onCancel={() => setShowSignPad(false)} />}
         </div>
     );
 };

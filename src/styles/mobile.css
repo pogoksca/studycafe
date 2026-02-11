@@ -7,7 +7,7 @@
   background-color: #f9fafb; /* bg-gray-50 */
   display: flex;
   flex-direction: column;
-  color: #1C1C1E;
+  color: #1c1c1e;
   padding-bottom: env(safe-area-inset-bottom);
 }
 
@@ -37,7 +37,9 @@
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.03);
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -59,7 +61,7 @@
 .mobile-menu-btn-text {
   font-size: 1rem;
   font-weight: 900;
-  color: #1C1C1E;
+  color: #1c1c1e;
 }
 
 .mobile-header {
@@ -114,7 +116,7 @@
 .mobile-seat-number {
   font-size: 10px;
   font-weight: 900;
-  color: #8E8E93;
+  color: #8e8e93;
   text-transform: uppercase;
   letter-spacing: -0.05em;
 }
@@ -122,7 +124,7 @@
 .mobile-student-name {
   font-size: 1rem;
   font-weight: 900;
-  color: #1C1C1E;
+  color: #1c1c1e;
 }
 
 .mobile-status-badge {
@@ -138,8 +140,14 @@
 }
 
 @keyframes slideUp {
-  from { transform: translateY(100%); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .mobile-slide-up {
@@ -187,7 +195,7 @@
 
 .zone-divider {
   height: 2px;
-  background-color: #F2F2F7;
+  background-color: #f2f2f7;
   border-radius: 1px;
   margin: 0; /* Spacing handled by column gap */
 }
@@ -196,10 +204,10 @@
   background: white;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #E5E5EA;
+  border: 1px solid #e5e5ea;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   transition: transform 0.1s;
 }
 
@@ -230,8 +238,14 @@
   border: 1px solid rgba(255, 255, 255, 0.4);
 }
 
-.status-dot.green { background-color: #00FF00; box-shadow: 0 0 4px rgba(0, 255, 0, 0.5); }
-.status-dot.red { background-color: #FF3B30; box-shadow: 0 0 4px rgba(255, 59, 48, 0.5); }
+.status-dot.green {
+  background-color: #00ff00;
+  box-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
+}
+.status-dot.red {
+  background-color: #ff3b30;
+  box-shadow: 0 0 4px rgba(255, 59, 48, 0.5);
+}
 
 .grid-card-body {
   padding: 8px 4px; /* Increased padding */
@@ -246,7 +260,7 @@
 .grid-card-student {
   font-size: 12px; /* Larger name */
   font-weight: 900;
-  color: #1C1C1E;
+  color: #1c1c1e;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -254,21 +268,21 @@
 
 .grid-card-id {
   font-size: 9px;
-  color: #8E8E93;
+  color: #8e8e93;
   font-weight: 600;
 }
 
 .grid-card-info {
   font-size: 8px;
-  color: #8E8E93;
+  color: #8e8e93;
   font-weight: 600;
 }
 
 .grid-card-footer {
   width: 100%;
   display: flex;
-  border-top: 1px solid #E5E5EA;
-  background-color: #F8F8F8;
+  border-top: 1px solid #e5e5ea;
+  background-color: #f8f8f8;
   overflow: hidden;
 }
 
@@ -292,7 +306,7 @@
   font-weight: 900;
   border: none;
   border-left: 1px solid rgba(0, 0, 0, 0.05);
-  background-color: #FF9500;
+  background-color: #ff9500;
   color: white;
   display: flex;
   align-items: center;
@@ -302,38 +316,79 @@
 }
 
 .grid-action-btn:active {
-  background-color: #E68600;
+  background-color: #e68600;
 }
 
 .grid-action-btn.subtle {
-  background-color: #F2F2F7;
-  color: #1C1C1E;
-  border-left: 1px solid #E5E5EA;
+  background-color: #f2f2f7;
+  color: #1c1c1e;
+  border-left: 1px solid #e5e5ea;
 }
 
 .grid-action-btn.subtle:active {
-  background-color: #E5E5EA;
+  background-color: #e5e5ea;
 }
 
 /* Status Specific Styles */
-.status-present-bg { background-color: #34C759; } /* iOS Emerald */
-.status-late-bg { background-color: #FF9500; }    /* iOS Amber */
-.status-early-bg { background-color: #FF3B30; }   /* iOS Rose */
+.status-present-bg {
+  background-color: #34c759;
+} /* iOS Emerald */
+.status-late-bg {
+  background-color: #ff9500;
+} /* iOS Amber */
+.status-early-bg {
+  background-color: #ff3b30;
+} /* iOS Rose */
 
-.status-present-btn { background-color: rgba(52, 199, 89, 0.1); color: #34C759; }
-.status-late-btn { background-color: rgba(255, 149, 0, 0.1); color: #FF9500; }
-.status-early-btn { background-color: rgba(255, 59, 48, 0.1); color: #FF3B30; }
-.status-absent-btn { background-color: #F2F2F7; color: #1C1C1E; }
+.status-present-btn {
+  background-color: rgba(52, 199, 89, 0.1);
+  color: #34c759;
+}
+.status-late-btn {
+  background-color: rgba(255, 149, 0, 0.1);
+  color: #ff9500;
+}
+.status-early-btn {
+  background-color: rgba(255, 59, 48, 0.1);
+  color: #ff3b30;
+}
+.status-absent-btn {
+  background-color: #f2f2f7;
+  color: #1c1c1e;
+}
+.text-ios-amber {
+  color: #ff9500;
+}
+.bg-ios-amber {
+  background-color: #ff9500;
+}
+.text-ios-indigo {
+  color: #5856d6;
+}
 
 /* Solid backgrounds for "Checked" active status on the left */
-.status-present-active { color: white; }
-.status-late-active { background-color: #FF9500; color: white; }
-.status-early-active { background-color: #FF3B30; color: white; }
+.status-present-active {
+  color: white;
+}
+.status-late-active {
+  background-color: #ff9500;
+  color: white;
+}
+.status-early-active {
+  background-color: #ff3b30;
+  color: white;
+}
 
 /* 3-Tier Usage Tiers */
-.tier-active { opacity: 1; }
-.tier-reserved { opacity: 0.4; }
-.tier-empty { opacity: 0.15; }
+.tier-active {
+  opacity: 1;
+}
+.tier-reserved {
+  opacity: 0.4;
+}
+.tier-empty {
+  opacity: 0.15;
+}
 
 .mobile-seatmap-container {
   width: 100%;

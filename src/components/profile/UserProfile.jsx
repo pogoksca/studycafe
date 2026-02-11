@@ -35,14 +35,8 @@ const UserProfile = ({ user }) => {
             .from('bookings')
             .select(`
                 *,
-                sessions (
-                    start_time,
-                    end_time
-                ),
-                attendance (
-                    status,
-                    timestamp_in
-                )
+                sessions (id, name, start_time, end_time),
+                attendance (id, booking_id, status, timestamp_in, timestamp_out)
             `)
             .or(`user_id.eq.${user.id},student_id.eq.${user.id}`)
             .gte('date', startOfAcademicYear);
@@ -64,9 +58,6 @@ const UserProfile = ({ user }) => {
                 if (isFutureDate) return; 
 
                 // Refined Total Bookings Logic:
-                // If date is today, only count if session has started
-                // (Or strictly: if session has ended? Let's say if it has started, user should be there)
-                // Common practice: Only count past sessions or sessions where attendance exists.
                 let shouldCountAsBooking = true;
                 if (b.date === todayStr && b.sessions) {
                     const sessionStart = new Date(`${b.date}T${b.sessions.start_time}+09:00`);
@@ -79,24 +70,21 @@ const UserProfile = ({ user }) => {
                     totalBookings++;
                 }
 
-                // Check attendance
-                const att = b.attendance && b.attendance[0];
+                // Check attendance robustly (handle array or object)
+                const atts = Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                const att = atts[0];
                 const validStatus = ['present', 'late', 'early_leave'];
                 
                 if (att && validStatus.includes(att.status)) {
-                    attendedCount++; // Now includes early_leave
+                    attendedCount++; 
                     studyDaysSet.add(b.date);
                     if (att.status === 'late') lates++;
 
                     // Precise Time Calculation
                     if (b.sessions) {
-                        // 1. Determine Standard Session Time
                         const sessionStart = new Date(`${b.date}T${b.sessions.start_time}+09:00`);
                         const sessionEnd = new Date(`${b.date}T${b.sessions.end_time}+09:00`);
                         
-                        // 2. Determine Actual In/Out
-                        // Use timestamp_in if valid, else fallback to session start (unless late??)
-                        // If no timestamp_in but status is present, assume session start.
                         let effectiveStart = sessionStart;
                         if (att.timestamp_in) {
                             const checkIn = new Date(att.timestamp_in);
@@ -107,13 +95,8 @@ const UserProfile = ({ user }) => {
                         if (att.timestamp_out) {
                             const checkOut = new Date(att.timestamp_out);
                             if (checkOut < sessionEnd) effectiveEnd = checkOut;
-                        } else if (att.status === 'early_leave') {
-                            // If early_leave but no timestamp_out, we can't penalty accurately.
-                            // Fallback: maybe just count it? Or assume end? 
-                            // Let's assume sessionEnd if missing, but usually early_leave implies timestamp_out exists.
                         }
 
-                        // 3. Calculate Duration
                         if (effectiveEnd > effectiveStart) {
                             const duration = (effectiveEnd - effectiveStart) / (1000 * 60);
                             studyMinutes += duration;
@@ -192,17 +175,31 @@ const UserProfile = ({ user }) => {
           <div className="grid grid-cols-7 gap-3">
             {currentMonthDays.map((day, idx) => {
               const dateStr = format(day, 'yyyy-MM-dd');
-              const bookingForDay = bookings.find(b => b.date === dateStr);
+              const allBookingsForDay = bookings.filter(b => b.date === dateStr);
               let status = null; 
               
-              if (bookingForDay) {
+              if (allBookingsForDay.length > 0) {
                   const todayStr = format(new Date(), 'yyyy-MM-dd');
                   if (dateStr > todayStr) {
                       status = 'booking';
                   } else {
-                      const att = bookingForDay.attendance && bookingForDay.attendance[0];
-                      if (att) status = att.status; 
-                      else status = 'absent';
+                      // Aggregate all bookings for the day to determine priority status
+                      const allAtts = allBookingsForDay.flatMap(b => {
+                          return Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                      });
+
+                      const totalSessions = allBookingsForDay.length;
+                      const attendedCount = allAtts.filter(a => a.status === 'present' || a.status === 'early_leave').length;
+
+                      if (attendedCount === totalSessions) {
+                          status = 'present'; // All sessions attended
+                      } else if (attendedCount > 0) {
+                          status = 'partial'; // Some sessions attended
+                      } else if (allAtts.some(a => a.status === 'late')) {
+                          status = 'late';
+                      } else {
+                          status = 'absent';
+                      }
                   }
               }
 
@@ -214,6 +211,7 @@ const UserProfile = ({ user }) => {
                    className={`aspect-square rounded-ios flex items-center justify-center text-[12px] font-black transition-all duration-500 ios-tap relative group ${
                     isSelected ? 'bg-ios-indigo text-white shadow-xl scale-[1.15] z-10' :
                     status === 'present' ? 'bg-ios-emerald/10 text-ios-emerald' :
+                    status === 'partial' ? 'bg-ios-blue/10 text-ios-blue' :
                     status === 'late' ? 'bg-ios-amber/10 text-ios-amber' :
                     status === 'absent' ? 'bg-ios-rose/10 text-ios-rose' :
                     status === 'booking' ? 'bg-ios-indigo/10 text-ios-indigo' :
@@ -224,6 +222,7 @@ const UserProfile = ({ user }) => {
                   {status && !isSelected && status !== 'booking' && (
                     <div className={`absolute bottom-1 w-1 h-1 rounded-full ${
                       status === 'present' ? 'bg-ios-emerald' :
+                      status === 'partial' ? 'bg-ios-blue' :
                       status === 'late' ? 'bg-ios-amber' : 'bg-ios-rose'
                     }`} />
                   )}
@@ -241,6 +240,7 @@ const UserProfile = ({ user }) => {
                 <div className="flex flex-wrap gap-4">
                   {[
                     { label: '출석', color: 'bg-ios-emerald' },
+                    { label: '일부이수', color: 'bg-ios-blue' },
                     { label: '지각', color: 'bg-ios-amber' },
                     { label: '결석', color: 'bg-ios-rose' },
                     { label: '수업', color: 'bg-gray-100' },

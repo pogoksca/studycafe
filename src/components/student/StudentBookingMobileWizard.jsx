@@ -184,39 +184,55 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                 const bookingMap = {};
                 const todayStr = format(new Date(), 'yyyy-MM-dd');
                 
+                // 1. Group by Date
                 bookings.forEach(b => {
                     const d = b.date;
-                    
-                    // Populate Booking Map
                     if (!bookingMap[d]) bookingMap[d] = [];
                     bookingMap[d].push(b);
+                });
 
-                    const att = b.attendance && b.attendance[0];
-                    
+                // 2. Calculate Status per Date
+                Object.keys(bookingMap).forEach(d => {
+                    const dayBookings = bookingMap[d];
                     let status = 'reserved';
+
                     if (d < todayStr) {
-                        if (att) {
-                            if (att.status === 'present') status = 'present';
-                            else if (att.status === 'late') status = 'late';
-                            else status = 'absent';
+                        // Past: Aggregate for Partial/Full/Late/Absent
+                        const totalSessions = dayBookings.length;
+                        
+                        // Collect all attendance records for this day
+                        const allAtts = dayBookings.flatMap(b => {
+                             return Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : []);
+                        });
+
+                        const attendedCount = allAtts.filter(a => a.status === 'present' || a.status === 'early_leave').length;
+                        const hasLate = allAtts.some(a => a.status === 'late');
+
+                        if (attendedCount === totalSessions && totalSessions > 0) {
+                            status = 'present';
+                        } else if (attendedCount > 0) {
+                            status = 'partial';
+                        } else if (hasLate) {
+                            status = 'late';
                         } else {
                             status = 'absent';
                         }
                     } else if (d === todayStr) {
-                        // For today, if already attended, show it
-                        if (att) {
-                            if (att.status === 'present') status = 'present';
-                            else if (att.status === 'late') status = 'late';
-                        }
+                         // Today: Simple check (Present/Late takes precedence over Reserved)
+                         // We don't show Partial for today usually as it's ongoing, or we could if we want strictly consistent view.
+                         // For now, let's keep it simple: if any 'present', show present.
+                         const allAtts = dayBookings.flatMap(b => 
+                            Array.isArray(b.attendance) ? b.attendance : (b.attendance ? [b.attendance] : [])
+                         );
+                         
+                         if (allAtts.some(a => a.status === 'present' || a.status === 'early_leave')) status = 'present';
+                         else if (allAtts.some(a => a.status === 'late')) status = 'late';
+                         else status = 'reserved';
                     }
-                    
-                    // Prioritize positive statuses if multiple bookings exist for a day
-                    if (!activityMap[d] || 
-                        (status === 'present' && activityMap[d] !== 'present') ||
-                        (status === 'late' && activityMap[d] === 'absent')) {
-                        activityMap[d] = status;
-                    }
+
+                    activityMap[d] = status;
                 });
+
                 setUserActivities(activityMap);
                 setDailyBookings(bookingMap);
             }
@@ -354,6 +370,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                                 ${isSelected 
                                     ? 'bg-ios-indigo text-white shadow-xl scale-105 z-10' 
                                     : activity === 'present' ? 'bg-ios-emerald text-white border-none' :
+                                      activity === 'partial' ? 'bg-ios-blue text-white border-none' :
                                       activity === 'late' ? 'bg-ios-amber text-white border-none' :
                                       activity === 'absent' ? 'bg-ios-rose text-white border-none' :
                                       activity === 'reserved' ? 'bg-ios-indigo text-white border-none' :
@@ -376,6 +393,7 @@ const StudentBookingMobileWizard = ({ onCancel, onSuccess, currentUser }) => {
                     <div className="flex flex-wrap gap-4">
                         {[
                             { label: '출석', color: 'bg-ios-emerald' },
+                            { label: '일부이수', color: 'bg-ios-blue' },
                             { label: '지각', color: 'bg-ios-amber' },
                             { label: '결석', color: 'bg-ios-rose' },
                             { label: '예약', color: 'bg-ios-indigo' }

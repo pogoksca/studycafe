@@ -18,6 +18,7 @@ import AttendancePrint from './components/admin/AttendancePrint'
 import ZoneManagement from './components/admin/ZoneManagement'
 import ZoneGradeManager from './components/admin/ZoneGradeManager'
 import SeatMapModal from './components/booking/SeatMapModal'
+import SeatManualSelectionModal from './components/booking/SeatManualSelectionModal'
 import { supabase } from './lib/supabase'
 import { format, parseISO } from 'date-fns'
 
@@ -63,6 +64,7 @@ function App() {
     return window.innerWidth < 768 && window.innerHeight > window.innerWidth;
   });
   const [isSeatModalOpen, setIsSeatModalOpen] = useState(false);
+  const [isManualSeatModalOpen, setIsManualSeatModalOpen] = useState(false);
 
   useEffect(() => {
     const handleResize = () => {
@@ -452,21 +454,32 @@ function App() {
                       initialDate={viewDate}
                       onDateChange={setViewDate}
                       currentZoneId={selectedZoneId}
-                      onOpenSeatModal={() => setIsSeatModalOpen(true)}
+                      onOpenSeatModal={() => setIsManualSeatModalOpen(true)}
                     />
                   </div>
                 </section>
-                
-                <SeatMapModal 
-                  isOpen={isSeatModalOpen} 
-                  onClose={() => setIsSeatModalOpen(false)} 
-                  zoneId={selectedZoneId} 
-                  onSelect={(seat) => { 
-                    setSelectedSeat(seat); 
-                    setIsSeatModalOpen(false); 
-                  }} 
-                  selectedDate={parseISO(viewDate)} 
-                />
+                                <SeatMapModal 
+                    isOpen={isSeatModalOpen} 
+                    onClose={() => setIsSeatModalOpen(false)} 
+                    zoneId={selectedZoneId} 
+                    onSelect={(seat) => { 
+                      setSelectedSeat(seat); 
+                      setIsSeatModalOpen(false); 
+                    }} 
+                    selectedDate={parseISO(viewDate)} 
+                  />
+
+                  <SeatManualSelectionModal
+                    isOpen={isManualSeatModalOpen}
+                    onClose={() => setIsManualSeatModalOpen(false)}
+                    zoneId={selectedZoneId}
+                    currentUser={selectedProxyUser || currentUser}
+                    onOpenMap={() => setIsSeatModalOpen(true)}
+                    onSelect={(seat) => {
+                      setSelectedSeat(seat);
+                      setIsManualSeatModalOpen(false);
+                    }}
+                  />
               </div>
             )}
           </div>
