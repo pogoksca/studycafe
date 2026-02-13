@@ -6,6 +6,7 @@ import { ko } from 'date-fns/locale';
 import AttendanceManager from '../admin/AttendanceManager';
 import BookingWizard from '../booking/BookingWizard';
 import SeatManualSelectionModal from '../booking/SeatManualSelectionModal';
+import DateSessionSelector from '../common/DateSessionSelector';
 import '../../styles/mobile.css';
 
 const SignaturePad = ({ onSave, onCancel, teacherName }) => {
@@ -615,6 +616,21 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
 
     const renderSupervisionView = () => (
         <main className="flex-1 flex flex-col h-full overflow-hidden" style={{ padding: '0 1rem 1rem 1rem' }}>
+            <div className="pt-2"> {/* Added container for Selector */}
+                <DateSessionSelector
+                    selectedDate={selectedDate}
+                    onDateChange={(date) => {
+                        setSelectedDate(date);
+                    }}
+                    sessions={sessions}
+                    activeSessionId={activeSession}
+                    onSessionChange={setActiveSession}
+                    zones={zones}
+                    selectedZoneId={selectedZoneId}
+                    onZoneChange={setSelectedZoneId}
+                    showSessions={false}
+                />
+            </div>
             <div className="flex-1 flex flex-col gap-4 h-full overflow-y-auto pb-6 pt-2">
                 {todayAssignments.map((assign) => (
                     <div key={assign.id} className="flex-1 min-h-[300px] bg-white rounded-[32px] p-6 border border-gray-100 shadow-sm flex flex-col items-center justify-center">
@@ -656,6 +672,20 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
 
     const renderAttendanceView = () => (
         <main className="mobile-attendance-list">
+            <div className="px-4 pt-4">
+                <DateSessionSelector
+                    selectedDate={selectedDate}
+                    onDateChange={(date) => {
+                        setSelectedDate(date);
+                    }}
+                    sessions={sessions}
+                    activeSessionId={activeSession}
+                    onSessionChange={setActiveSession}
+                    zones={zones}
+                    selectedZoneId={selectedZoneId}
+                    onZoneChange={setSelectedZoneId}
+                />
+            </div>
             <div className="mobile-zone-grid">
                 {['A', 'B', 'C'].map(zoneLetter => {
                     const zoneSeats = attendanceData.filter(item => item.zone_name?.startsWith(zoneLetter) || item.seat_number?.startsWith(zoneLetter));
@@ -668,7 +698,45 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                 {zoneSeats.map((item) => {
                                     const tierClass = item.is_active ? 'tier-active' : item.is_booked_today ? 'tier-reserved' : 'tier-empty';
                                     const headerColor = item.zone_color || fallbackColor;
-                                    const dotColor = item.status === 'present' ? 'green' : 'red';
+                                    
+                                    // Time-based Logic
+                                    const currentSession = sessions.find(s => s.id === activeSession);
+                                    let isSessionEnded = false;
+                                    if (currentSession && selectedDate) {
+                                        const now = new Date();
+                                        const todayStr = format(now, 'yyyy-MM-dd');
+                                        if (selectedDate < todayStr) {
+                                            isSessionEnded = true;
+                                        } else if (selectedDate === todayStr) {
+                                            const currentTime = format(now, 'HH:mm:ss');
+                                            isSessionEnded = currentTime > currentSession.end_time;
+                                        }
+                                    }
+
+                                    let statusLabel = '';
+                                    let statusClass = '';
+                                    let isAttended = item.status === 'present' || item.status === 'late' || item.status === 'early_leave';
+                                    
+                                    if (isAttended) {
+                                        if (item.timestamp_out || isSessionEnded) {
+                                            statusLabel = '학습 완료';
+                                            statusClass = 'status-done-active'; // New class needed or reuse
+                                        } else {
+                                            statusLabel = item.status === 'present' ? '학습중' : '지각';
+                                            statusClass = item.status === 'present' ? 'status-present-active' : 'status-late-active';
+                                        }
+                                    } else {
+                                        if (isSessionEnded) {
+                                            statusLabel = '결석';
+                                            statusClass = 'status-truant-active'; // New class needed
+                                        } else {
+                                            statusLabel = '미출석';
+                                            statusClass = 'status-absent-btn';
+                                        }
+                                    }
+
+                                    const dotColor = isAttended ? 'green' : 'red';
+                                    
                                     return (
                                         <div key={item.seat_id} className={`mobile-grid-card ${tierClass}`}>
                                             <div className="grid-card-header" style={{ backgroundColor: headerColor }}>
@@ -682,10 +750,16 @@ const TeacherMobileView = ({ onLogout, currentUser }) => {
                                             </div>
                                             <div className="grid-card-footer">
                                                 {item.full_name ? (
-                                                    item.status === 'absent' ? (
-                                                        <><div className="grid-status-btn status-absent-btn">미출석</div><button className="grid-action-btn" onClick={() => toggleAttendance(item)} style={{ backgroundColor: headerColor }}>출석처리</button></>
+                                                    !isAttended ? (
+                                                        <>
+                                                            <div className={`grid-status-btn ${statusClass}`} style={statusLabel === '결석' ? { color: '#FF3B30', backgroundColor: '#FF3B301A' } : {}}>{statusLabel}</div>
+                                                            <button className="grid-action-btn" onClick={() => toggleAttendance(item)} style={{ backgroundColor: headerColor }}>출석처리</button>
+                                                        </>
                                                     ) : (
-                                                        <><div className={`grid-status-btn ${item.status === 'present' ? 'status-present-active' : item.status === 'late' ? 'status-late-active' : 'status-early-active'}`} style={{ backgroundColor: item.status === 'present' ? headerColor : undefined }}>{item.status === 'present' ? '학습중' : '지각'}</div><button className="grid-action-btn subtle" onClick={() => resetAttendance(item)}>결석처리</button></>
+                                                        <>
+                                                            <div className={`grid-status-btn ${statusClass}`} style={{ backgroundColor: statusLabel === '학습 완료' ? '#8E8E93' : (item.status === 'present' ? headerColor : undefined), color: statusLabel === '학습 완료' ? 'white' : undefined }}>{statusLabel}</div>
+                                                            <button className="grid-action-btn subtle" onClick={() => resetAttendance(item)}>결석처리</button>
+                                                        </>
                                                     )
                                                 ) : <div className="grid-status-btn status-absent-btn opacity-20">-</div>}
                                             </div>
