@@ -21,12 +21,12 @@ const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
   const findActiveWindowSession = useCallback((sessions) => {
     const now = new Date();
     const todayStr = format(now, 'yyyy-MM-dd');
-    
+
     return sessions.find(s => {
       const startTime = parse(`${todayStr} ${s.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
       const windowStart = subMinutes(startTime, 10);
       const windowEnd = addMinutes(startTime, 30);
-      
+
       return isAfter(now, windowStart) && isBefore(now, windowEnd);
     });
   }, []);
@@ -35,7 +35,7 @@ const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
     const fetchAndSetActiveSession = async () => {
       setLoadingSession(true);
       const { data: sessions } = await supabase.from('sessions').select('*');
-      
+
       if (sessions) {
         const active = findActiveWindowSession(sessions);
         setActiveSession(active);
@@ -54,47 +54,47 @@ const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
     return () => clearInterval(timer);
   }, [findActiveWindowSession]);
 
-// Inside AttendanceCheck component
+  // Inside AttendanceCheck component
   // 1. Logic for button modes
   const [isWithin10MinOfNext, setIsWithin10MinOfNext] = useState(false);
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
 
   useEffect(() => {
     const checkStatus = async () => {
-        if (!user) return;
-        const now = new Date();
-        const todayStr = format(now, 'yyyy-MM-dd');
-        
-        // Check if user has ANY active attendance for current or next session
-        const { data: allSessions } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
-        
-        if (allSessions) {
-            const currentTime = format(now, 'HH:mm:ss');
-            const active = allSessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
-            const next = allSessions.find(s => s.start_time > currentTime);
+      if (!user) return;
+      const now = new Date();
+      const todayStr = format(now, 'yyyy-MM-dd');
 
-            // Time check for 10min window
-            if (next) {
-                const nextStart = parse(`${todayStr} ${next.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
-                const diff = (nextStart.getTime() - now.getTime()) / (1000 * 60);
-                setIsWithin10MinOfNext(diff >= 0 && diff <= 10);
-            } else {
-                setIsWithin10MinOfNext(false);
-            }
+      // Check if user has ANY active attendance for current or next session
+      const { data: allSessions } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
 
-            // Attendance check
-            const targetSession = active || next;
-            if (targetSession) {
-                const { data: att } = await supabase
-                    .from('bookings')
-                    .select('attendance(timestamp_in)')
-                    .eq('user_id', user.id)
-                    .eq('date', todayStr)
-                    .eq('session_id', targetSession.id)
-                    .maybeSingle();
-                setHasCheckedInToday(!!att?.attendance?.[0]?.timestamp_in);
-            }
+      if (allSessions) {
+        const currentTime = format(now, 'HH:mm:ss');
+        const active = allSessions.find(s => currentTime >= s.start_time && currentTime <= s.end_time);
+        const next = allSessions.find(s => s.start_time > currentTime);
+
+        // Time check for 10min window
+        if (next) {
+          const nextStart = parse(`${todayStr} ${next.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+          const diff = (nextStart.getTime() - now.getTime()) / (1000 * 60);
+          setIsWithin10MinOfNext(diff >= 0 && diff <= 10);
+        } else {
+          setIsWithin10MinOfNext(false);
         }
+
+        // Attendance check
+        const targetSession = active || next;
+        if (targetSession) {
+          const { data: att } = await supabase
+            .from('bookings')
+            .select('attendance(timestamp_in)')
+            .eq('user_id', user.id)
+            .eq('date', todayStr)
+            .eq('session_id', targetSession.id)
+            .maybeSingle();
+          setHasCheckedInToday(!!att?.attendance?.[0]?.timestamp_in);
+        }
+      }
     };
     checkStatus();
     const itv = setInterval(checkStatus, 30000);
@@ -113,70 +113,73 @@ const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
 
     navigator.geolocation.getCurrentPosition(async (position) => {
       const { latitude, longitude, accuracy } = position.coords;
-      
+
       // 1. Fetch Global GPS Settings
       const { data: gpsData } = await supabase.from('configs').select('value').eq('key', 'gps_settings').single();
       const gpsValue = gpsData?.value || {};
+      const isGpsEnabled = gpsValue.enabled !== false; // Default to true if undefined
       const targetPoints = gpsValue.points || [{ lat: gpsValue.lat || 37.5665, lng: gpsValue.lng || 126.9780, name: '기본 지점' }];
       const targetRadius = gpsValue.radius || 100;
 
-      // 2. Verify Distance
-      let isWithinRange = false;
+      // 2. Verify Distance (Only if GPS is enabled)
+      let isWithinRange = !isGpsEnabled;
       let minDistance = Infinity;
       const R = 6371e3;
 
-      targetPoints.forEach(point => {
-          const φ1 = latitude * Math.PI/180;
-          const φ2 = point.lat * Math.PI/180;
-          const Δφ = (point.lat-latitude) * Math.PI/180;
-          const Δλ = (point.lng-longitude) * Math.PI/180;
-          const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2) * Math.sin(Δλ/2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      if (isGpsEnabled) {
+        targetPoints.forEach(point => {
+          const φ1 = latitude * Math.PI / 180;
+          const φ2 = point.lat * Math.PI / 180;
+          const Δφ = (point.lat - latitude) * Math.PI / 180;
+          const Δλ = (point.lng - longitude) * Math.PI / 180;
+          const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           const d = R * c;
           if (d < minDistance) minDistance = d;
           if (d <= targetRadius) isWithinRange = true;
-      });
+        });
+      }
 
       if (!isWithinRange) {
         setStatus('error');
         if (accuracy > 1000) {
-          setMessage(`위치 정보가 부정확합니다. 스마트폰 GPS를 켜주세요.`);
+          setMessage(`위치 정보가 부정확합니다. 스마트폰 GPS를 켜고 다시 시도해 주세요.`);
         } else {
-          setMessage(`외부에서는 처리할 수 없습니다. (${Math.round(minDistance)}m 차이)`);
+          setMessage(`인증 반경을 벗어났습니다. (${Math.round(minDistance)}m 차이)\n데이터를 끄고, 와이파이를 켠 상태에서 다시 인증해 보세요.`);
         }
         return;
       }
 
       try {
-          const today = format(new Date(), 'yyyy-MM-dd');
-          const nowKSTISO = getKSTISOString();
-          
-          let targetSession = activeSession;
-          if (!targetSession) {
-              const { data: allSess } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
-              const curTime = format(new Date(), 'HH:mm:ss');
-              targetSession = allSess.find(s => s.start_time > curTime);
-          }
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const nowKSTISO = getKSTISOString();
 
-          if (!targetSession) throw new Error('세션 정보를 찾을 수 없습니다.');
+        let targetSession = activeSession;
+        if (!targetSession) {
+          const { data: allSess } = await supabase.from('sessions').select('*').order('start_time', { ascending: true });
+          const curTime = format(new Date(), 'HH:mm:ss');
+          targetSession = allSess.find(s => s.start_time > curTime);
+        }
 
-          const { data: booking } = await supabase.from('bookings').select('id').eq('user_id', user.id).eq('date', today).eq('session_id', targetSession.id).maybeSingle();
-          if (!booking) throw new Error(`'${targetSession.name}' 예약 내역이 없습니다.`);
+        if (!targetSession) throw new Error('세션 정보를 찾을 수 없습니다.');
 
-          if (mode === 'attendance') {
-              const startTime = parse(`${today} ${targetSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
-              const finalStatus = isAfter(new Date(), addMinutes(startTime, 10)) ? 'late' : 'present';
-              await supabase.from('attendance').upsert({ booking_id: booking.id, status: finalStatus, timestamp_in: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
-              setMessage(`'${targetSession.name}' 출석 완료!`);
-          } else { // mode === 'leave'
-              await supabase.from('attendance').upsert({ booking_id: booking.id, status: 'early_leave', timestamp_out: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
-              setMessage(`'${targetSession.name}' 조퇴/퇴실 완료!`);
-          }
-          setStatus('done');
-          if (onSuccess) setTimeout(onSuccess, 1500);
+        const { data: booking } = await supabase.from('bookings').select('id').eq('user_id', user.id).eq('date', today).eq('session_id', targetSession.id).maybeSingle();
+        if (!booking) throw new Error(`'${targetSession.name}' 예약 내역이 없습니다.`);
+
+        if (mode === 'attendance') {
+          const startTime = parse(`${today} ${targetSession.start_time}`, 'yyyy-MM-dd HH:mm:ss', new Date());
+          const finalStatus = isAfter(new Date(), addMinutes(startTime, 10)) ? 'late' : 'present';
+          await supabase.from('attendance').upsert({ booking_id: booking.id, status: finalStatus, timestamp_in: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
+          setMessage(`'${targetSession.name}' 출석 완료!`);
+        } else { // mode === 'leave'
+          await supabase.from('attendance').upsert({ booking_id: booking.id, status: 'early_leave', timestamp_out: nowKSTISO, updated_at: new Date().toISOString() }, { onConflict: 'booking_id' });
+          setMessage(`'${targetSession.name}' 조퇴/퇴실 완료!`);
+        }
+        setStatus('done');
+        if (onSuccess) setTimeout(onSuccess, 1500);
       } catch (err) {
-          setMessage(err.message || '오류가 발생했습니다.');
-          setStatus('error');
+        setMessage(err.message || '오류가 발생했습니다.');
+        setStatus('error');
       }
     }, (error) => {
       setStatus('error');
@@ -190,76 +193,73 @@ const AttendanceCheck = ({ user, isEarlyLeaveMode = false, onSuccess }) => {
   return (
     <div className="bg-white p-8 max-w-[360px] w-full text-center space-y-6 relative overflow-hidden rounded-[32px] shadow-2xl border border-gray-50 animate-spring-up">
       <div className="absolute top-0 left-0 w-32 h-32 bg-ios-indigo/5 blur-3xl -z-10" />
-      
-      <div className={`w-16 h-16 rounded-[1.2rem] mx-auto flex items-center justify-center transition-all duration-700 shadow-sm border ${
-        status === 'verified' || status === 'done' ? 'bg-ios-emerald/10 text-ios-emerald border-ios-emerald/20' :
+
+      <div className={`w-16 h-16 rounded-[1.2rem] mx-auto flex items-center justify-center transition-all duration-700 shadow-sm border ${status === 'verified' || status === 'done' ? 'bg-ios-emerald/10 text-ios-emerald border-ios-emerald/20' :
         status === 'error' ? 'bg-ios-rose/10 text-ios-rose border-ios-rose/20' :
-        status === 'locating' ? 'bg-ios-indigo/10 text-ios-indigo animate-pulse border-ios-indigo/20' :
-        'bg-white text-gray-200 border-gray-100'
-      }`}>
+          status === 'locating' ? 'bg-ios-indigo/10 text-ios-indigo animate-pulse border-ios-indigo/20' :
+            'bg-white text-gray-200 border-gray-100'
+        }`}>
         {status === 'done' ? <CheckCircle2 className="w-8 h-8" /> :
-         status === 'error' ? <AlertCircle className="w-8 h-8" /> :
-         status === 'locating' ? <MapPin className="w-8 h-8" /> :
-         <ShieldCheck className="w-8 h-8" />}
+          status === 'error' ? <AlertCircle className="w-8 h-8" /> :
+            status === 'locating' ? <MapPin className="w-8 h-8" /> :
+              <ShieldCheck className="w-8 h-8" />}
       </div>
 
       <div className="space-y-4">
-        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-black border ${
-            hasCheckedInToday ? 'bg-ios-rose/5 text-ios-rose border-ios-rose/10' : 'bg-ios-indigo/5 text-ios-indigo border-ios-indigo/10'
-        }`}>
-            <Clock className="w-3.5 h-3.5" />
-            {hasCheckedInToday ? '현재 세션 입실 중' : (activeSession ? `'${activeSession.name}' 진행 중` : '세션 대기 중')}
+        <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-black border ${hasCheckedInToday ? 'bg-ios-rose/5 text-ios-rose border-ios-rose/10' : 'bg-ios-indigo/5 text-ios-indigo border-ios-indigo/10'
+          }`}>
+          <Clock className="w-3.5 h-3.5" />
+          {hasCheckedInToday ? '현재 세션 입실 중' : (activeSession ? `'${activeSession.name}' 진행 중` : '세션 대기 중')}
         </div>
-        
+
         <h3 className="text-[26px] font-black tracking-tight text-[#1C1C1E] leading-tight">
-            {status === 'done' ? '완료되었습니다' : status === 'locating' ? '위치 확인 중' : '출석 및 조퇴 확인'}
+          {status === 'done' ? '완료되었습니다' : status === 'locating' ? '위치 확인 중' : '출석 및 조퇴 확인'}
         </h3>
-        
+
         <p className="text-sm font-bold text-ios-gray leading-relaxed px-4">
-            {status === 'done' ? '정상적으로 처리되었습니다.' : '원하시는 작업을 선택해주세요.'}
+          {status === 'done' ? '정상적으로 처리되었습니다.' : '원하시는 작업을 선택해주세요.'}
         </p>
       </div>
 
       <div className="space-y-3 pt-2">
-          {message && (
-              <p className={`text-[12px] font-black p-3.5 rounded-apple-md ${status === 'error' ? 'bg-ios-rose/5 text-ios-rose border border-ios-rose/10' : 'bg-ios-emerald/5 text-ios-emerald border border-ios-emerald/10'}`}>
-                  {message}
-              </p>
-          )}
+        {message && (
+          <p className={`text-[12px] font-black p-3.5 rounded-apple-md whitespace-pre-line ${status === 'error' ? 'bg-ios-rose/5 text-ios-rose border border-ios-rose/10' : 'bg-ios-emerald/5 text-ios-emerald border border-ios-emerald/10'}`}>
+            {message}
+          </p>
+        )}
 
-          {status !== 'done' && (
-            <>
-                {/* 1. Attendance Button: Only if a session is active or starting soon AND not yet checked in */}
-                {showAttendanceBtn && !hasCheckedInToday && (
-                    <button 
-                        onClick={() => handleAction('attendance')}
-                        disabled={status === 'locating'}
-                        className="w-full py-[20px] bg-ios-indigo text-white rounded-3xl font-black text-[17px] shadow-lg shadow-indigo-500/20 transition-all active:scale-[0.98] ios-tap"
-                    >
-                        {activeSession ? `${activeSession.name} 출석 인증` : '다음 세션 출석 인증'}
-                    </button>
-                )}
+        {status !== 'done' && (
+          <>
+            {/* 1. Attendance Button: Only if a session is active or starting soon AND not yet checked in */}
+            {showAttendanceBtn && !hasCheckedInToday && (
+              <button
+                onClick={() => handleAction('attendance')}
+                disabled={status === 'locating'}
+                className="w-full py-[20px] bg-ios-indigo text-white rounded-3xl font-black text-[17px] shadow-lg shadow-indigo-500/20 transition-all active:scale-[0.98] ios-tap"
+              >
+                {activeSession ? `${activeSession.name} 출석 인증` : '다음 세션 출석 인증'}
+              </button>
+            )}
 
-                {/* 2. Early Leave Button: Always available in early leave mode OR during break pre-session */}
-                {(showEarlyLeaveBtn || hasCheckedInToday) && (
-                    <button 
-                        onClick={() => handleAction('leave')}
-                        disabled={status === 'locating'}
-                        className={`w-full py-[20px] rounded-3xl font-black text-[17px] transition-all active:scale-[0.98] ios-tap ${
-                            hasCheckedInToday ? 'bg-ios-rose text-white shadow-xl shadow-red-500/20' : 'bg-ios-rose/10 text-ios-rose border border-ios-rose/20'
-                        }`}
-                    >
-                        {hasCheckedInToday ? '지금 조퇴하기' : '미리 퇴실 신청'}
-                    </button>
-                )}
-                
-                {!showAttendanceBtn && !showEarlyLeaveBtn && !hasCheckedInToday && (
-                    <div className="bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-200">
-                         <p className="text-xs font-bold text-gray-400">현재 인증 가능한 시간이 아닙니다.</p>
-                    </div>
-                )}
-            </>
-          )}
+            {/* 2. Early Leave Button: Always available in early leave mode OR during break pre-session */}
+            {(showEarlyLeaveBtn || hasCheckedInToday) && (
+              <button
+                onClick={() => handleAction('leave')}
+                disabled={status === 'locating'}
+                className={`w-full py-[20px] rounded-3xl font-black text-[17px] transition-all active:scale-[0.98] ios-tap ${hasCheckedInToday ? 'bg-ios-rose text-white shadow-xl shadow-red-500/20' : 'bg-ios-rose/10 text-ios-rose border border-ios-rose/20'
+                  }`}
+              >
+                {hasCheckedInToday ? '지금 조퇴하기' : '미리 퇴실 신청'}
+              </button>
+            )}
+
+            {!showAttendanceBtn && !showEarlyLeaveBtn && !hasCheckedInToday && (
+              <div className="bg-gray-50 p-6 rounded-2xl border border-dashed border-gray-200">
+                <p className="text-xs font-bold text-gray-400">현재 인증 가능한 시간이 아닙니다.</p>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

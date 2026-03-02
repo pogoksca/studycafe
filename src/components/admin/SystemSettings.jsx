@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { 
-  Save, MapPin, Navigation, Radius, AlertCircle, 
-  CheckCircle2, School, Clock, ListRestart, 
-  PlusCircle, Edit, Trash2, Layout, Settings, 
-  ChevronRight, Info, Plus, Check
+import {
+    Save, MapPin, Navigation, Radius, AlertCircle,
+    CheckCircle2, School, Clock, ListRestart,
+    PlusCircle, Edit, Trash2, Layout, Settings,
+    ChevronRight, Info, Plus, Check
 } from 'lucide-react';
 
 const SystemSettings = () => {
@@ -12,16 +12,17 @@ const SystemSettings = () => {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(false);
-    
+
     // Global Settings
     const [schoolName, setSchoolName] = useState('');
     const [schoolNameEn, setSchoolNameEn] = useState('');
     const [schoolLevel, setSchoolLevel] = useState('고등학교');
-    
+
     // GPS & Safety States
-    const [gpsSettings, setGpsSettings] = useState({ 
-        points: [{ lat: 37.5665, lng: 126.9780, name: '기본 지점' }], 
-        radius: 100 
+    const [gpsSettings, setGpsSettings] = useState({
+        points: [{ lat: 37.5665, lng: 126.9780, name: '기본 지점' }],
+        radius: 100,
+        enabled: true
     });
 
     // Simple setter for global state
@@ -40,7 +41,7 @@ const SystemSettings = () => {
             // 1. Fetch School Config
             const { data: configData, error: configError } = await supabase.from('configs').select('*').eq('key', 'school_info').single();
             if (configError && configError.code !== 'PGRST116') throw configError;
-            
+
             if (configData) {
                 setSchoolName(configData.value.name || '');
                 setSchoolNameEn(configData.value.name_en || '');
@@ -50,15 +51,19 @@ const SystemSettings = () => {
             // 3. Fetch GPS Config (Global)
             const { data: gpsData, error: gpsError } = await supabase.from('configs').select('*').eq('key', 'gps_settings').single();
             if (gpsError && gpsError.code !== 'PGRST116') throw gpsError;
-            
+
             if (gpsData?.value) {
                 // Migrate legacy latitude/longitude to points if needed
                 if (gpsData.value.points) {
-                    setGpsSettings(gpsData.value);
+                    setGpsSettings({
+                        ...gpsData.value,
+                        enabled: gpsData.value.enabled !== undefined ? gpsData.value.enabled : true
+                    });
                 } else if (gpsData.value.lat) {
                     setGpsSettings({
                         points: [{ lat: gpsData.value.lat, lng: gpsData.value.lng, name: '기본 지점' }],
-                        radius: gpsData.value.radius || 100
+                        radius: gpsData.value.radius || 100,
+                        enabled: true
                     });
                 }
             }
@@ -83,10 +88,10 @@ const SystemSettings = () => {
             // 1. Save School Info
             await supabase.from('configs').upsert({
                 key: 'school_info',
-                value: { 
-                    name: schoolName, 
-                    name_en: schoolNameEn, 
-                    level: schoolLevel 
+                value: {
+                    name: schoolName,
+                    name_en: schoolNameEn,
+                    level: schoolLevel
                 }
             });
 
@@ -122,7 +127,7 @@ const SystemSettings = () => {
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto scrollbar-hide p-8 pb-32">
                 <div className="max-w-4xl mx-auto space-y-12">
-                    
+
                     {/* Header Summary */}
                     <div className="flex items-center justify-between bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
                         <div className="flex items-center gap-4">
@@ -150,8 +155,8 @@ const SystemSettings = () => {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-min">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 한글명</label>
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     value={schoolName}
                                     onChange={(e) => setSchoolName(e.target.value)}
                                     className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
@@ -159,8 +164,8 @@ const SystemSettings = () => {
                             </div>
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교 영문명 (브랜딩용)</label>
-                                <input 
-                                    type="text" 
+                                <input
+                                    type="text"
                                     value={schoolNameEn}
                                     onChange={(e) => setSchoolNameEn(e.target.value)}
                                     className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none"
@@ -170,7 +175,7 @@ const SystemSettings = () => {
                             <div className="space-y-2">
                                 <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest ml-1">학교급</label>
                                 <div className="relative">
-                                    <select 
+                                    <select
                                         value={schoolLevel}
                                         onChange={(e) => setSchoolLevel(e.target.value)}
                                         className="w-full bg-gray-50 border border-gray-100 focus:bg-white focus:border-ios-indigo/20 rounded-xl px-5 py-4 text-base font-bold text-[#1C1C1E] transition-all outline-none appearance-none cursor-pointer"
@@ -198,23 +203,36 @@ const SystemSettings = () => {
                         <div className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100 space-y-8">
                             <div className="flex items-start gap-3 p-4 bg-ios-amber/5 border border-ios-amber/10 rounded-xl">
                                 <Info className="w-4 h-4 text-ios-amber mt-0.5" />
-                                <p className="text-xs text-ios-amber font-bold leading-relaxed">
-                                    출석 인증을 위해 여러 개의 GPS 인증 지점을 등록할 수 있습니다.<br/>
-                                    ※ 이 설정은 모든 학습 공간(Zone)에 공통으로 적용됩니다.
-                                </p>
+                                <div className="space-y-1">
+                                    <p className="text-xs text-ios-amber font-bold leading-relaxed">
+                                        출석 인증을 위해 여러 개의 GPS 인증 지점을 등록할 수 있습니다.<br />
+                                        ※ 이 설정은 모든 학습 공간(Zone)에 공통으로 적용됩니다.
+                                    </p>
+                                    <div className="flex items-center gap-3 pt-2 mt-2 border-t border-ios-amber/10">
+                                        <button
+                                            onClick={() => updateGpsSettings({ ...gpsSettings, enabled: !gpsSettings.enabled })}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${gpsSettings.enabled ? 'bg-ios-indigo' : 'bg-gray-200'}`}
+                                        >
+                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${gpsSettings.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                                        </button>
+                                        <span className={`text-xs font-black ${gpsSettings.enabled ? 'text-ios-indigo' : 'text-gray-400'}`}>
+                                            {gpsSettings.enabled ? '인증 안전 반경 활성화됨' : '인증 안전 반경 비활성 (전체 허용)'}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
-                                     <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest flex items-center gap-1.5 ml-1">인증 반경 설정</label>
+                                    <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest flex items-center gap-1.5 ml-1">인증 반경 설정</label>
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <Radius className="w-5 h-5 text-ios-indigo" />
                                     <div className="flex-1">
-                                        <input 
-                                            type="number" 
+                                        <input
+                                            type="number"
                                             value={gpsSettings.radius || 100}
-                                            onChange={(e) => updateGpsSettings({...gpsSettings, radius: parseInt(e.target.value)})}
+                                            onChange={(e) => updateGpsSettings({ ...gpsSettings, radius: parseInt(e.target.value) })}
                                             className="w-full bg-white border border-gray-100 rounded-xl px-4 py-3 text-sm font-bold text-[#1C1C1E] outline-none focus:ring-1 focus:ring-ios-indigo transition-all"
                                             placeholder="허용 반경 (m)"
                                         />
@@ -225,29 +243,29 @@ const SystemSettings = () => {
 
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
-                                     <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest flex items-center gap-1.5 ml-1">
-                                         인증 지점 관리 ({gpsSettings.points?.length || 0}개)
-                                     </label>
-                                     {(!gpsSettings.points || gpsSettings.points.length < 10) && (
-                                         <button 
+                                    <label className="text-[10px] font-black text-ios-gray uppercase tracking-widest flex items-center gap-1.5 ml-1">
+                                        인증 지점 관리 ({gpsSettings.points?.length || 0}개)
+                                    </label>
+                                    {(!gpsSettings.points || gpsSettings.points.length < 10) && (
+                                        <button
                                             onClick={() => {
                                                 const newPoints = [...(gpsSettings.points || [])];
                                                 newPoints.push({ lat: 37.5665, lng: 126.9780, name: `지점 ${newPoints.length + 1}` });
                                                 updateGpsSettings({ ...gpsSettings, points: newPoints });
                                             }}
                                             className="text-[10px] font-bold text-ios-indigo hover:bg-ios-indigo/10 px-2 py-1 rounded transition-colors"
-                                         >
-                                             + 지점 추가
-                                         </button>
-                                     )}
+                                        >
+                                            + 지점 추가
+                                        </button>
+                                    )}
                                 </div>
-                                
+
                                 <div className="space-y-3">
                                     {gpsSettings.points?.map((point, idx) => (
                                         <div key={idx} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm relative group">
                                             <div className="flex items-center gap-3 mb-3">
                                                 <MapPin className="w-4 h-4 text-ios-rose" />
-                                                <input 
+                                                <input
                                                     type="text"
                                                     value={point.name || `지점 ${idx + 1}`}
                                                     onChange={(e) => {
@@ -259,7 +277,7 @@ const SystemSettings = () => {
                                                     placeholder="지점 이름"
                                                 />
                                                 {gpsSettings.points.length > 1 && (
-                                                    <button 
+                                                    <button
                                                         onClick={() => {
                                                             const newPoints = gpsSettings.points.filter((_, i) => i !== idx);
                                                             updateGpsSettings({ ...gpsSettings, points: newPoints });
@@ -273,7 +291,7 @@ const SystemSettings = () => {
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div>
                                                     <label className="text-[9px] text-gray-400 font-bold mb-1 block">위도 (Latitude)</label>
-                                                    <input 
+                                                    <input
                                                         type="number" step="0.000001"
                                                         value={point.lat}
                                                         onChange={(e) => {
@@ -286,7 +304,7 @@ const SystemSettings = () => {
                                                 </div>
                                                 <div>
                                                     <label className="text-[9px] text-gray-400 font-bold mb-1 block">경도 (Longitude)</label>
-                                                    <input 
+                                                    <input
                                                         type="number" step="0.000001"
                                                         value={point.lng}
                                                         onChange={(e) => {
@@ -311,14 +329,13 @@ const SystemSettings = () => {
             {/* Sticky Bottom Save Bar */}
             <div className="flex-none p-6 border-t border-gray-100 bg-white/80 backdrop-blur-xl z-20">
                 <div className="max-w-4xl mx-auto flex items-center gap-4">
-                    <button 
+                    <button
                         onClick={handleSaveAll}
                         disabled={saving}
-                        className={`flex-1 py-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all ios-tap shadow-lg ${
-                            success 
-                            ? 'bg-[#1C1C1E] text-white' 
-                            : 'bg-[#1C1C1E] text-white hover:bg-gray-800'
-                        }`}
+                        className={`flex-1 py-5 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all ios-tap shadow-lg ${success
+                                ? 'bg-[#1C1C1E] text-white'
+                                : 'bg-[#1C1C1E] text-white hover:bg-gray-800'
+                            }`}
                     >
                         {saving ? (
                             <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
